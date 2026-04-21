@@ -527,7 +527,7 @@ describe("parseMarkdownToBlocks — GitHub alerts", () => {
   test("detects each GitHub alert kind, case-insensitive", () => {
     for (const kind of ["NOTE", "TIP", "WARNING", "CAUTION", "IMPORTANT"]) {
       const blocks = parseMarkdownToBlocks(`> [!${kind}]\n> body`);
-      expect(blocks[0].alertKind).toBe(kind.toLowerCase());
+      expect(blocks[0].alertKind).toBe(kind.toLowerCase() as 'note' | 'tip' | 'warning' | 'caution' | 'important');
     }
     const lower = parseMarkdownToBlocks("> [!note]\n> body");
     expect(lower[0].alertKind).toBe("note");

@@ -12,6 +12,7 @@ const ALLOWED_TAGS = [
 
 const ALLOWED_ATTR = [
   'href', 'src', 'alt', 'title', 'rel', 'target', 'width', 'height', 'align',
+  'open', // preserve <details open> default-expanded state
 ];
 
 /**

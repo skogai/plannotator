@@ -1,5 +1,6 @@
 import React from "react";
 import { transformPlainText } from "../utils/inlineTransforms";
+import { getImageSrc } from "./ImageThumbnail";
 
 const DANGEROUS_PROTOCOL = /^\s*(javascript|data|vbscript|file)\s*:/i;
 function sanitizeLinkUrl(url: string): string | null {
