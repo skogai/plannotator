@@ -159,7 +159,7 @@ export const BlockRenderer: React.FC<{
       return <hr className="border-border/30 my-8" data-block-id={block.id} />;
 
     case 'html':
-      return <HtmlBlock block={block} />;
+      return <HtmlBlock block={block} imageBaseDir={imageBaseDir} onOpenLinkedDoc={onOpenLinkedDoc} />;
 
     case 'directive': {
       const kind = block.directiveKind || 'note';
