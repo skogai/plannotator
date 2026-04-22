@@ -9,7 +9,7 @@
  *
  * RoomState is intentionally NOT defined here — it contains server-only
  * fields (roomVerifier, adminVerifier, event log) and belongs in
- * apps/room-service (Slice 2).
+ * apps/room-service.
  */
 
 // ---------------------------------------------------------------------------

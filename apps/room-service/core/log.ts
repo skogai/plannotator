@@ -1,7 +1,7 @@
 /**
  * Redaction-aware logging for the room service.
  *
- * Per specs/v1.md: "Redact proofs, verifiers, ciphertext, and message bodies from logs."
+ * Redacts proofs, verifiers, ciphertext, and message bodies from logs.
  */
 
 const REDACTED_KEYS = new Set([

@@ -100,7 +100,7 @@ export function isValidationError<T>(result: T | ValidationError): result is Val
 }
 
 // ---------------------------------------------------------------------------
-// Post-Auth Message Validation (Slice 3)
+// Post-Auth Message Validation
 // ---------------------------------------------------------------------------
 
 const VALID_CHANNELS = new Set(['event', 'presence']);

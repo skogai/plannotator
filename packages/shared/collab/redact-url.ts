@@ -3,7 +3,7 @@
  * telemetry, error reporting, referrer headers, or logs.
  *
  * Threat model: the URL fragment `#key=<roomSecret>` is the product's access
- * token. Slice 5 intentionally keeps the fragment in the visible URL bar so
+ * token. We intentionally keep the fragment in the visible URL bar so
  * refresh + copy-address-bar keep working. That means any code path that
  * captures `window.location.href` or `document.referrer` for reporting must
  * route through this helper first. Missing one capture site would ship room

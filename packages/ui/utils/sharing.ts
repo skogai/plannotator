@@ -192,9 +192,9 @@ export async function parseShareHash(): Promise<SharePayload | null> {
   try {
     // `decompress` returns `unknown` by design (it's a generic
     // utility); the caller is responsible for shape-validating the
-    // result. For Slice 5 we keep the historical cast and accept that
-    // malformed share hashes will surface downstream. Full runtime
-    // validation is tracked as follow-up cleanup.
+    // result. We keep the historical cast and accept that malformed
+    // share hashes will surface downstream. Full runtime validation
+    // is tracked as follow-up cleanup.
     return (await decompress(hash)) as SharePayload;
   } catch (e) {
     console.warn('Failed to parse share hash:', e);

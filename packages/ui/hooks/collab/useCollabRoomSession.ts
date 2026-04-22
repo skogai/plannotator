@@ -1,7 +1,7 @@
 /**
  * useCollabRoomSession — join-intent wrapper around useCollabRoom.
  *
- * Slice 4's useCollabRoom supports the WebSocket join flow (parse URL →
+ * useCollabRoom supports the WebSocket join flow (parse URL →
  * authenticate → subscribe). This wrapper adds URL parsing + admin URL
  * reconstruction on top so RoomApp can render the participant/admin
  * share links without re-implementing that logic.

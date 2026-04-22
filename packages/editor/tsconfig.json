@@ -1,4 +1,4 @@
-// Slice-5 scoped typecheck for the editor package.
+// Scoped typecheck for the editor package.
 //
 // Explicitly curated entry points:
 //   - AppRoot.tsx (mode fork: local | room | invalid-room)
@@ -13,17 +13,17 @@
 //
 // What "scoped" actually means in this config:
 //   - The `include` list names the files we want to ACTIVELY CURATE
-//     for Slice-5 correctness — i.e. the ones a Slice-5 reviewer is
-//     expected to keep clean.
+//     for Live Rooms correctness — i.e. the ones a reviewer working
+//     on room code is expected to keep clean.
 //   - Errors surfacing from App.tsx (or anything further downstream)
-//     are still blocking: they break `bun run typecheck`, so Slice-5
-//     changes that regress App.tsx's types will be caught. But this
-//     config does NOT promise that App.tsx stays debt-free over time;
-//     the broader package-wide typecheck is deferred because
+//     are still blocking: they break `bun run typecheck`, so changes
+//     that regress App.tsx's types will be caught. But this config
+//     does NOT promise that App.tsx stays debt-free over time; the
+//     broader package-wide typecheck is deferred because
 //     `packages/ui` and `packages/editor` have pre-existing drift
 //     unrelated to Live Rooms.
 //
-// If App.tsx grows new debt as unrelated slices land, a future pass
+// If App.tsx grows new debt as unrelated work lands, a future pass
 // should either fix the debt or carve out a separate baseline — not
 // hide coverage behind the `include` list.
 {

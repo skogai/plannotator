@@ -11,7 +11,7 @@
  * - HKDF uses SHA-256 with a zero-filled 32-byte salt (standard when
  *   no application-specific salt is provided).
  * - HMAC input concatenation uses null byte (\0) separators between
- *   components to prevent ambiguity. See specs/v1.md.
+ *   components to prevent ambiguity.
  * - AES-GCM uses a 12-byte random IV prepended to ciphertext.
  */
 

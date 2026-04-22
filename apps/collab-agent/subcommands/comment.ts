@@ -9,10 +9,10 @@
  *                      that want to pick a block without a separate
  *                      `read-plan` call)
  *
- * Block-level targeting by design (see Slice 6a plan): the annotation
- * spans the entire block, so the "selection accuracy" issue that
- * plagues `/api/external-annotations` inline-text matching doesn't
- * apply. V1 agents do NOT attempt sub-range targeting.
+ * Block-level targeting by design: the annotation spans the entire
+ * block, so the "selection accuracy" issue that plagues
+ * `/api/external-annotations` inline-text matching doesn't apply.
+ * V1 agents do NOT attempt sub-range targeting.
  *
  * Exit codes:
  *   0  comment echoed back from server

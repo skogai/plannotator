@@ -256,10 +256,9 @@ async function serveIndexHtml(
 //
 // CORS is NOT abuse protection — it's a browser same-origin policy and does
 // nothing to a direct HTTP client. Any future reviewer flagging "this
-// endpoint is unauthenticated" should be pointed HERE and to
-// `specs/v1-implementation-approach.md` → "Production hardening: rate-limit
-// POST /api/rooms". The protocol design accommodates this gating without
-// client changes.
+// endpoint is unauthenticated" should be pointed HERE. Production hardening
+// (rate-limit POST /api/rooms) is the intended gate; the protocol design
+// accommodates adding it without client changes.
 // ---------------------------------------------------------------------------
 
 async function handleCreateRoom(

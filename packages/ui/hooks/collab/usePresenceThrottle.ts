@@ -2,7 +2,7 @@
  * Trailing-throttle presence updates to a send function.
  *
  * Motivation: remote cursor presence is produced by pointermove/selection
- * events that fire far faster than we should transmit. Slice 5 policy is
+ * events that fire far faster than we should transmit. Policy is a
  * 50ms trailing throttle (≈20Hz). Presence is lossy — the runtime swallows
  * disconnect errors inside `sendPresence`, so latest-cursor-wins is fine.
  *

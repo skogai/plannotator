@@ -158,7 +158,7 @@ Demo confirms each comment's echo per heading and exits non-zero if any comment 
 - **No admin actions.** You cannot lock, unlock, or delete the room. If the URL contained \`#admin=\`, the CLI strips it and warns; you join as a regular participant.
 - **No image attachments.** V1 room annotations are text only.
 - **Server-authoritative.** Your post is not final until the server echoes it back. \`comment\` waits; \`demo\` tracks per-heading success. Don't assume local intent landed.
-- **Block-level only.** Do NOT attempt to select a sub-range of text for annotation anchoring. That path has known selection-accuracy issues (\`specs/v1-selection-accuracy.md\`). Quote specific wording inside your comment body if it matters.
+- **Block-level only.** Do NOT attempt to select a sub-range of text for annotation anchoring. That path has known selection-accuracy issues. Quote specific wording inside your comment body if it matters.
 
 ## Troubleshooting
 

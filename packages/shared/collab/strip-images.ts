@@ -32,7 +32,7 @@ function toRoomAnnotations<T extends { images?: unknown }>(
  * Batch conversion + count of how many local items will NOT travel to
  * the room.
  *
- * Used by the Slice 5 creator flow to decide whether to show an "N items
+ * Used by the creator flow to decide whether to show an "N items
  * stripped" notice before creating a room. The count combines:
  *   - annotations with a non-empty `images` array (per-annotation
  *     attachments — only `clean` carries forward), and

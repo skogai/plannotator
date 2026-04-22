@@ -138,8 +138,8 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
   // last send rejected. `setAnnotations` is retained as a name pointing at
   // `controller.setAll` — undefined in room mode, so the few downstream
   // consumers that ATOMIC-replace (useSharing import, draft restore, linked
-  // doc switch) degrade to no-ops in room mode. That is the Slice 5
-  // contract: those flows are not supported inside a live room.
+  // doc switch) degrade to no-ops in room mode. Those flows are not
+  // supported inside a live room.
   const annotationController = useAnnotationController({
     initial: [],
     room: roomSession?.room,
@@ -548,9 +548,9 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
   // Room-mode exclusion: when a live room is active, external annotations are
   // NOT merged. An SSE-sourced annotation visible only to the creator would
   // diverge from other participants' views and could be accidentally
-  // consolidated into approve/deny payloads. Later Slice 6 work can
-  // forward the SSE stream to encrypted room ops so external annotations
-  // become shared.
+  // consolidated into approve/deny payloads. A future pass can forward
+  // the SSE stream to encrypted room ops so external annotations become
+  // shared.
   const allAnnotations = useMemo(() => {
     if (roomSession?.room) return annotations;
     if (externalAnnotations.length === 0) return annotations;
@@ -1089,7 +1089,7 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
   });
 
   // Note: room admin actions (lock / unlock / delete) intentionally
-  // only live in the RoomPanel in Slice 5. The header menu used to
+  // only live in the RoomPanel. The header menu used to
   // duplicate them via a `runHeaderRoomAdmin` wrapper, but that path
   // swallowed errors without a visible surface — RoomPanel owns the
   // `adminActionError` UI and the pending-state chrome, so routing
@@ -1336,8 +1336,8 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
     const hasDocAnnotations = Array.from(docAnnotations.values()).some(
       (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
     );
-    // Room mode: global attachments are local-only (Slice 5 rooms carry
-    // no image payloads), so they must NOT be included in consolidated
+    // Room mode: global attachments are local-only (rooms carry no
+    // image payloads), so they must NOT be included in consolidated
     // feedback — approving with local-only image refs would ship paths
     // collaborators never saw. Out-of-room keeps existing behavior.
     const effectiveGlobalAttachments = roomModeActive ? [] : globalAttachments;
@@ -1834,7 +1834,7 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
               onStartLiveRoom={canStartLiveRoom ? handleStartLiveRoom : undefined}
               isRoomAdmin={roomSession?.room?.hasAdminCapability ?? false}
               roomIsLocked={roomSession?.room?.roomStatus === 'locked'}
-              // Admin actions live only in the RoomPanel in Slice 5.
+              // Admin actions live only in the RoomPanel.
               // Passing undefined here hides the header-menu duplicate
               // so failures can't silently disappear in the catch
               // block that used to live behind these callbacks.
@@ -1844,9 +1844,9 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
               onSaveToObsidian={() => handleQuickSaveToNotes('obsidian')}
               onSaveToBear={() => handleQuickSaveToNotes('bear')}
               onSaveToOctarine={() => handleQuickSaveToNotes('octarine')}
-              // Static share/import is mutually exclusive with room mode in
-              // Slice 5. When joined to a live room, the "Copy Share Link"
-              // and "Import Review" menu items are hidden; "Start live room"
+              // Static share/import is mutually exclusive with room mode.
+              // When joined to a live room, the "Copy Share Link" and
+              // "Import Review" menu items are hidden; "Start live room"
               // is also hidden since we're already in one.
               sharingEnabled={sharingEnabled && !roomModeActive}
               isApiMode={isApiMode}

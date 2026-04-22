@@ -13,8 +13,8 @@
  *   read-plan          print decrypted plan markdown (add --with-block-ids for block markers)
  *   read-annotations   print current annotations as JSON
  *   read-presence      print recent peer presence (not a roster)
- *   comment            post a block-level comment annotation (Phase 5)
- *   demo               walk headings and leave comments at each (Phase 6)
+ *   comment            post a block-level comment annotation
+ *   demo               walk headings and leave comments at each
  *
  * Exit codes:
  *   0  success
