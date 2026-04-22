@@ -55,7 +55,6 @@ export const AdminErrorCode = {
   UnknownAdminChallenge: 'unknown_admin_challenge',
   AdminChallengeExpired: 'admin_challenge_expired',
   InvalidAdminProof: 'invalid_admin_proof',
-  InvalidState: 'invalid_state',
   DeleteFailed: 'delete_failed',
 } as const;
 

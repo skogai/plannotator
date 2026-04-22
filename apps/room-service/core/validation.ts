@@ -216,15 +216,11 @@ export function validateAdminCommandEnvelope(
   //   Honest clients serialize clean commands and their proofs verify.
   // - Downstream code (logging, storage, proof recomputation) only ever sees
   //   the narrow shape its type says it does.
-  let sanitizedCommand: AdminCommandEnvelope['command'];
-  if (cmd.type === 'room.delete') {
-    sanitizedCommand = { type: 'room.delete' };
-  } else {
-    // Explicit fallback: if a future admin command is added to
-    // VALID_ADMIN_COMMANDS without a branch here, reject rather than
-    // accidentally aliasing to room.delete.
-    return { error: `Unknown command type: ${String(cmd.type)}`, status: 400 };
-  }
+  // The type gate above (VALID_ADMIN_COMMANDS.has(cmd.type)) already
+  // restricts cmd.type to the single valid value. If a future admin
+  // command is added, expand the Set AND split the sanitization below
+  // into per-type branches at the same time.
+  const sanitizedCommand: AdminCommandEnvelope['command'] = { type: 'room.delete' };
 
   return {
     type: 'admin.command',

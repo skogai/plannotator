@@ -63,11 +63,12 @@ export interface CollabRoomState {
   /** Keyed by sender clientId. Stale entries are pruned by lastSeen TTL. */
   remotePresence: Record<string, PresenceState>;
   /**
-   * V1 assumes a single creator-held admin capability. The normal participant
-   * share URL is `#key=...` only. The `#key=...&admin=...` URL is a sensitive
-   * creator/recovery URL and is not intentionally shared with participants.
-   * Because of this, admin commands resolve by observing room.status transitions
-   * rather than command-specific acks — acceptable for V1, not multi-admin safe.
+   * True when this client holds the admin secret. The normal participant
+   * share URL is `#key=...` only; the `#key=...&admin=...` URL is the
+   * sensitive creator/recovery URL and is not intentionally shared with
+   * participants. Admin commands resolve by observing the matching
+   * room.status broadcast rather than a command-specific ack; a future
+   * multi-admin surface would need commandId-correlated acks instead.
    */
   hasAdminCapability: boolean;
   /**

@@ -453,7 +453,7 @@ describe('CollabRoomClient — admin', () => {
     // Server sends room.error instead of room.status
     ws.peer.sendFromServer(JSON.stringify({
       type: 'room.error',
-      code: 'invalid_state',
+      code: 'delete_failed',
       message: 'Cannot delete',
     }));
 
@@ -1973,7 +1973,7 @@ describe('CollabRoomClient — getState() returns immutable snapshot (P2)', () =
 
     // Seed a non-null lastError by pushing a room.error from the server.
     ws.peer.sendFromServer(JSON.stringify({
-      type: 'room.error', code: 'invalid_state', message: 'Test error message',
+      type: 'room.error', code: 'validation_error', message: 'Test error message',
     }));
     await waitFor(() => client.getState().lastError !== null, 1000);
 
@@ -2001,7 +2001,7 @@ describe('CollabRoomClient — getState() returns immutable snapshot (P2)', () =
     expect(snap2.remotePresence.intruder).toBeUndefined();
     expect(snap2.lastError).not.toBeNull();
     expect(snap2.lastError!.message).toBe('Test error message');
-    expect(snap2.lastError!.code).toBe('invalid_state');
+    expect(snap2.lastError!.code).toBe('validation_error');
 
     client.disconnect();
   });

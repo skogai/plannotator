@@ -1279,22 +1279,20 @@ export class CollabRoomClient {
     this.roomStatus = status;
     this.emitter.emit('room-status', status);
 
-    // V1 assumes a single creator-held admin capability. We resolve admin commands
-    // by observing room.status because the server does not emit command-specific
-    // admin acknowledgements. If multi-admin rooms are supported later, replace this
-    // with commandId-based admin.result acks from the room service.
-    if (this.pendingAdmin) {
+    // We resolve the pending admin command by observing the matching
+    // room.status broadcast, because the server does not emit a
+    // command-specific admin.result ack. If the admin-command surface
+    // ever grows beyond a single command, replace this with a
+    // commandId-correlated ack from the room service.
+    if (
+      this.pendingAdmin &&
+      this.pendingAdmin.command.type === 'room.delete' &&
+      status === 'deleted'
+    ) {
       const pending = this.pendingAdmin;
-      const cmdType = pending.command.type;
-
-      let shouldResolve = false;
-      if (cmdType === 'room.delete' && status === 'deleted') shouldResolve = true;
-
-      if (shouldResolve) {
-        clearTimeout(pending.timeoutHandle);
-        this.pendingAdmin = null;
-        pending.resolve();
-      }
+      clearTimeout(pending.timeoutHandle);
+      this.pendingAdmin = null;
+      pending.resolve();
     }
 
     this.emitState();

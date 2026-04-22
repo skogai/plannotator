@@ -735,10 +735,10 @@ export class RoomDurableObject extends DurableObject<Env> {
     ws: WebSocket,
     roomState: RoomDurableState,
   ): Promise<void> {
-    if (roomState.status === 'deleted' || roomState.status === 'expired') {
-      this.sendAdminError(ws, AdminErrorCode.InvalidState, 'Room is already in a terminal state');
-      return;
-    }
+    // No terminal-state guard needed: checkRoomLifecycle runs at the
+    // top of handleAdminCommand and closes the socket + returns early
+    // for any room whose status is already 'deleted' or 'expired', so
+    // this path is only reachable with status === 'active'.
 
     // Write tombstone first — even if event purge fails, room is marked deleted
     const {

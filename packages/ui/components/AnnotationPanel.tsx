@@ -348,7 +348,7 @@ const AnnotationCard: React.FC<{
    */
   isMe: (author: string | undefined) => boolean;
   onSelect: () => void;
-  /** Undefined = hide delete button (e.g. pending/failed row, read-only context). */
+  /** Undefined = hide delete button (e.g. row is pending or failed). */
   onDelete?: () => void;
   onEdit?: (updates: Partial<Annotation>) => void;
 }> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit }) => {
