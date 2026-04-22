@@ -83,15 +83,6 @@ interface ViewerProps {
   onToggleCheckbox?: (blockId: string, checked: boolean) => void;
   checkboxOverrides?: Map<string, boolean>;
   /**
-   * When true, annotation creation affordances (selection toolbar,
-   * comment popover) and attachment controls are hidden. Existing
-   * annotation highlights remain visible for review. Currently
-   * defaults to false at every call site; kept as a structural gate
-   * for future read-only surfaces that want the editor chrome without
-   * the write affordances.
-   */
-  readOnly?: boolean;
-  /**
    * When set, newly-created annotations stamp `author` with this
    * value instead of the cookie-backed `getIdentity()`. Threaded
    * from App in room mode so annotations carry the display name
@@ -203,7 +194,6 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   sourceInfo,
   onToggleCheckbox,
   checkboxOverrides,
-  readOnly = false,
   authorOverride,
   attachmentsEnabled = true,
   localDocLinksEnabled = true,
@@ -251,38 +241,6 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const stickySentinelRef = useRef<HTMLDivElement>(null);
   const [isStuck, setIsStuck] = useState(false);
 
-  // Read-only transition cleanup (Viewer-owned write state).
-  //
-  // `useAnnotationHighlighter` already clears its own pending
-  // selection/toolbar/popover/picker state when `readOnly` flips true.
-  // Viewer owns SEPARATE state for the global-comment popover, the
-  // code-block comment popover (shared `viewerCommentPopover`), the
-  // code-block quick-label picker, and the code-block hover toolbar.
-  // Without this effect those would be hidden-but-alive while
-  // read-only and pop back on exit — contradicting the hook's
-  // "cancel in progress" contract. Clearing all of them (plus any
-  // in-flight hover timeout / exit animation) keeps Viewer's
-  // read-only response consistent with the hook's.
-  useEffect(() => {
-    if (!readOnly) return;
-    setViewerCommentPopover(null);
-    setCodeBlockQuickLabelPicker(null);
-    setHoveredCodeBlock(null);
-    setIsCodeBlockToolbarExiting(false);
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-      hoverTimeoutRef.current = null;
-    }
-  }, [readOnly]);
-
-  // Shared annotation infrastructure via hook.
-  // In read-only mode we neutralize the add callback so a selection
-  // doesn't produce an annotation. Existing highlights still render
-  // (annotations is unchanged) and onSelectAnnotation still works for
-  // navigation; only the CREATE path is suppressed.
-  const effectiveOnAddAnnotation = readOnly
-    ? (_: Annotation) => { /* no-op; room is read-only */ }
-    : onAddAnnotation;
   const {
     highlighterRef,
     toolbarState,
@@ -302,27 +260,24 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   } = useAnnotationHighlighter({
     containerRef,
     annotations,
-    onAddAnnotation: effectiveOnAddAnnotation,
+    onAddAnnotation,
     onSelectAnnotation,
     selectedAnnotationId,
     mode,
-    // Read-only gate inside the hook: existing annotations still
-    // render via applyAnnotations, but selection-triggered marks,
-    // toolbar/popover/quick-label states, and the mobile selection
-    // bridge are all suppressed. Keeps the editor readable + copyable
-    // without exposing write affordances.
-    readOnly,
     authorOverride,
     onSurfaceReset: handleSurfaceReset,
   });
 
-  // Refs for code block annotation path. When readOnly, use the same
-  // no-op wrapper as the selection path so submissions from the code
-  // block toolbar don't mutate state or create annotations.
-  const onAddAnnotationRef = useRef(effectiveOnAddAnnotation);
-  useEffect(() => { onAddAnnotationRef.current = effectiveOnAddAnnotation; }, [effectiveOnAddAnnotation]);
+  // Stable refs for handlePinpointCodeBlockClick, which is a useCallback
+  // with stable deps (`[blocks]`). It reads `modeRef.current` directly and
+  // calls `applyCodeBlockAnnotation` (which closes over `onAddAnnotation`).
+  // Without these refs the cached callback would see a stale `mode`
+  // at click time, and the captured `applyCodeBlockAnnotation` closure
+  // would call a stale `onAddAnnotation`.
   const modeRef = useRef<EditorMode>(mode);
   useEffect(() => { modeRef.current = mode; }, [mode]);
+  const onAddAnnotationRef = useRef(onAddAnnotation);
+  useEffect(() => { onAddAnnotationRef.current = onAddAnnotation; }, [onAddAnnotation]);
 
   // Pinpoint mode: hover + click to select elements
   const handlePinpointCodeBlockClick = useCallback((blockId: string, element: HTMLElement) => {
@@ -352,10 +307,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     highlighterRef,
     inputMethod,
     // Pinpoint is a mutation path (clicking a block creates an
-    // annotation via handlePinpointCodeBlockClick). Disable it in
-    // read-only mode so the viewer doesn't expose a click target that
-    // would no-op.
-    enabled: !readOnly && !toolbarState && !hookCommentPopover && !viewerCommentPopover && !hookQuickLabelPicker && !codeBlockQuickLabelPicker && !(isPlanDiffActive ?? false),
+    // annotation via handlePinpointCodeBlockClick). Disable while
+    // another popover / picker / diff surface is active so clicks
+    // don't compete with those modes.
+    enabled: !toolbarState && !hookCommentPopover && !viewerCommentPopover && !hookQuickLabelPicker && !codeBlockQuickLabelPicker && !(isPlanDiffActive ?? false),
     onCodeBlockClick: handlePinpointCodeBlockClick,
   });
 
@@ -447,18 +402,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     codeEl: Element,
     type: AnnotationType,
     text?: string,
-    /* readOnly gate inside the body below — cheaper than threading a
-       guard through every caller. */
     images?: ImageAttachment[],
     isQuickLabel?: boolean,
     quickLabelTip?: string,
   ) => {
-    // Read-only: return before any DOM mutation. Without this early
-    // exit the code block would get a temporary local <mark> that
-    // isn't backed by a canonical annotation, misleading the user
-    // into thinking their annotation exists.
-    if (readOnly) return;
-
     const id = `codeblock-${Date.now()}`;
     const codeText = codeEl.textContent || '';
 
@@ -590,8 +537,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
         {/* Header buttons - top right */}
         <div data-print-hide data-sticky-actions className={`${stickyActions ? 'sticky top-3' : ''} z-30 float-right flex items-start gap-1 md:gap-2 rounded-lg p-1 md:p-2 transition-colors duration-150 ${isStuck ? 'bg-card/95 backdrop-blur-sm shadow-sm' : ''} -mr-3 mt-6 md:-mr-5 md:-mt-5 lg:-mr-7 lg:-mt-7 xl:-mr-9 xl:-mt-9`}>
-          {/* Attachments button — hidden in read-only mode */}
-          {!readOnly && onAddGlobalAttachment && onRemoveGlobalAttachment && (
+          {/* Attachments button — hidden when the caller doesn't wire
+              add/remove handlers (e.g. room mode where participants
+              don't send image attachments over the wire). */}
+          {onAddGlobalAttachment && onRemoveGlobalAttachment && (
             <AttachmentsButton
               images={globalAttachments}
               onAdd={onAddGlobalAttachment}
@@ -602,26 +551,24 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           )}
 
           {/* <span className="md:hidden">Comment</span><span className="hidden md:inline">Global comment</span> button */}
-          {!readOnly && (
-            <button
-              ref={globalCommentButtonRef}
-              onClick={() => {
-                setViewerCommentPopover({
-                  anchorEl: globalCommentButtonRef.current!,
-                  contextText: '',
-                  isGlobal: true,
-                });
-              }}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors"
-              title="Add global comment"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
-              </svg>
-              {actionsLabelMode === 'full' && <span>Global comment</span>}
-              {actionsLabelMode === 'short' && <span>Comment</span>}
-            </button>
-          )}
+          <button
+            ref={globalCommentButtonRef}
+            onClick={() => {
+              setViewerCommentPopover({
+                anchorEl: globalCommentButtonRef.current!,
+                contextText: '',
+                isGlobal: true,
+              });
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors"
+            title="Add global comment"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
+            </svg>
+            {actionsLabelMode === 'full' && <span>Global comment</span>}
+            {actionsLabelMode === 'short' && <span>Comment</span>}
+          </button>
 
           {/* Copy plan/file button */}
           <button
@@ -711,10 +658,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           )
         )}
 
-        {/* Text selection toolbar — defense-in-depth: the hook already
-            suppresses toolbarState in readOnly, but render-gating here
-            too makes the read-only invariant locally obvious. */}
-        {!readOnly && toolbarState && (
+        {/* Text selection toolbar */}
+        {toolbarState && (
           <ToolbarErrorBoundary>
             <AnnotationToolbar
               element={toolbarState.element}
@@ -729,8 +674,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           </ToolbarErrorBoundary>
         )}
 
-        {/* Code block hover toolbar — suppressed in read-only mode. */}
-        {!readOnly && hoveredCodeBlock && !toolbarState && (
+        {/* Code block hover toolbar */}
+        {hoveredCodeBlock && !toolbarState && (
           <ToolbarErrorBoundary>
           <AnnotationToolbar
             element={hoveredCodeBlock.element}
@@ -765,9 +710,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           <PinpointOverlay target={hoverTarget} containerRef={containerRef} />
         )}
 
-        {/* Comment popover — hook handles text selection, Viewer handles global + code block.
-            All write-path popovers suppressed in readOnly. */}
-        {!readOnly && hookCommentPopover && (
+        {/* Comment popover — hook handles text selection, Viewer handles global + code block. */}
+        {hookCommentPopover && (
           <CommentPopover
             anchorEl={hookCommentPopover.anchorEl}
             contextText={hookCommentPopover.contextText}
@@ -778,7 +722,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             attachmentsEnabled={attachmentsEnabled}
           />
         )}
-        {!readOnly && viewerCommentPopover && (
+        {viewerCommentPopover && (
           <CommentPopover
             anchorEl={viewerCommentPopover.anchorEl}
             contextText={viewerCommentPopover.contextText}
@@ -790,9 +734,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           />
         )}
 
-        {/* Quick Label floating picker — hook handles text selection, Viewer handles code blocks.
-            Also a write path → suppressed in readOnly. */}
-        {!readOnly && hookQuickLabelPicker && (
+        {/* Quick Label floating picker — hook handles text selection, Viewer handles code blocks. */}
+        {hookQuickLabelPicker && (
           <FloatingQuickLabelPicker
             anchorEl={hookQuickLabelPicker.anchorEl}
             cursorHint={hookQuickLabelPicker.cursorHint}
@@ -800,7 +743,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             onDismiss={hookQuickLabelPickerDismiss}
           />
         )}
-        {!readOnly && codeBlockQuickLabelPicker && (
+        {codeBlockQuickLabelPicker && (
           <FloatingQuickLabelPicker
             anchorEl={codeBlockQuickLabelPicker.anchorEl}
             onSelect={(label: QuickLabel) => {

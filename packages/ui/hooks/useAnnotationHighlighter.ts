@@ -44,16 +44,6 @@ export interface UseAnnotationHighlighterOptions {
   mode: EditorMode;
   enabled?: boolean;
   /**
-   * When true: suppress ALL write paths (selection-triggered marks,
-   * toolbar, comment popover, quick-label picker, mobile selection
-   * bridge) while KEEPING existing annotations renderable via
-   * applyAnnotations() and still forwarding `onSelectAnnotation` clicks
-   * for sidebar navigation. Currently dormant at every call site; kept
-   * as a structural gate for future read-only surfaces that want the
-   * editor chrome without the write affordances.
-   */
-  readOnly?: boolean;
-  /**
    * Override the `author` field stamped on newly-created annotations.
    * When unset, falls back to `getIdentity()` (configStore displayName,
    * the cookie-backed Tater name). Passed from App when in room mode so
@@ -107,7 +97,6 @@ export function useAnnotationHighlighter({
   selectedAnnotationId,
   mode,
   enabled = true,
-  readOnly = false,
   authorOverride,
   onSurfaceReset,
 }: UseAnnotationHighlighterOptions): UseAnnotationHighlighterReturn {
@@ -115,8 +104,6 @@ export function useAnnotationHighlighter({
   // without re-binding event handlers on every change.
   const authorOverrideRef = useRef(authorOverride);
   useEffect(() => { authorOverrideRef.current = authorOverride; }, [authorOverride]);
-  const readOnlyRef = useRef(readOnly);
-  useEffect(() => { readOnlyRef.current = readOnly; }, [readOnly]);
   // Ref for the surface-reset callback so the init effect can call the
   // latest version without re-binding (and dropping) the highlighter on
   // every parent re-render.
@@ -138,28 +125,6 @@ export function useAnnotationHighlighter({
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { onAddAnnotationRef.current = onAddAnnotation; }, [onAddAnnotation]);
   useEffect(() => { onSelectAnnotationRef.current = onSelectAnnotation; }, [onSelectAnnotation]);
-
-  // Transition into read-only: tear down any in-progress write
-  // interaction. Without this, a user who had a toolbar/popover/picker
-  // open at the moment readOnly flips true would keep the underlying
-  // pending mark (pendingSourceRef) + the UI state alive — the Viewer
-  // hides the UI behind !readOnly but the local <mark> stays in the
-  // DOM as a ghost annotation the user thinks they created.
-  useEffect(() => {
-    if (!readOnly) return;
-    const highlighter = highlighterRef.current;
-    if (highlighter && pendingSourceRef.current) {
-      highlighter.remove(pendingSourceRef.current.id);
-    }
-    pendingSourceRef.current = null;
-    setToolbarState(null);
-    setCommentPopover(null);
-    setQuickLabelPicker(null);
-    // Also release the browser selection so the user sees a definitive
-    // "your action was cancelled" state instead of a highlighted range
-    // with nothing attached to it.
-    try { window.getSelection()?.removeAllRanges(); } catch { /* ignore */ }
-  }, [readOnly]);
 
   // Track mouse position for quick label picker
   useEffect(() => {
@@ -447,15 +412,6 @@ export function useAnnotationHighlighter({
     highlighter.on(Highlighter.event.CREATE, ({ sources }: { sources: any[] }) => {
       if (sources.length > 0) {
         const source = sources[0];
-        // Read-only: drop the mark the highlighter just created and
-        // suppress every write-path transition. Users can still select
-        // text for copy, but selecting won't leave a persistent local
-        // mark or surface an annotation toolbar.
-        if (readOnlyRef.current) {
-          highlighter.remove(source.id);
-          window.getSelection()?.removeAllRanges();
-          return;
-        }
         const doms = highlighter.getDoms(source.id);
         if (doms?.length > 0) {
           // Clean up previous pending
@@ -502,22 +458,15 @@ export function useAnnotationHighlighter({
 
     highlighter.run();
 
-    // Mobile bridge — install once per highlighter lifetime on touch
-    // devices, and honor the CURRENT read-only state at event time via
-    // readOnlyRef. Gating at install time would strand the listener
-    // across any mid-lifetime readOnly flip.
+    // Mobile bridge — on touch devices, forward selectionchange events
+    // into the highlighter via a debounced fromRange() call so
+    // tap-and-hold selections surface the annotation toolbar.
     const isTouchPrimary = window.matchMedia('(pointer: coarse)').matches;
     let selectionTimer: ReturnType<typeof setTimeout>;
     const handleSelectionChange = isTouchPrimary
       ? () => {
-          // Checked on every event so readOnly flips take effect
-          // immediately without re-init churn. Avoids the mark-then-remove
-          // flicker that would result if we let the CREATE handler do the
-          // clean-up after a fromRange() was forwarded.
-          if (readOnlyRef.current) return;
           clearTimeout(selectionTimer);
           selectionTimer = setTimeout(() => {
-            if (readOnlyRef.current) return;  // re-check after debounce
             const sel = window.getSelection();
             if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
             if (!containerRef.current?.contains(sel.anchorNode)) return;

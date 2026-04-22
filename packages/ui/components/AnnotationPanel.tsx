@@ -370,10 +370,11 @@ const AnnotationCard: React.FC<{
     }
   }, [annotation.text, isEditing]);
 
-  // Cancel in-progress edits when the card becomes read-only (e.g. room
-  // locks while the user has a textarea open). Without this, the
-  // textarea would persist visually; Save would silently no-op because
-  // onEdit is now undefined, confusing the user.
+  // Cancel in-progress edits when `onEdit` disappears — happens when
+  // the row flips into pending/failed room-sync state mid-edit.
+  // Without this the textarea would persist visually; Save would
+  // silently no-op because onEdit is now undefined, confusing the
+  // user.
   useEffect(() => {
     if (!onEdit && isEditing) {
       setIsEditing(false);
