@@ -982,15 +982,23 @@ export class CollabRoomClient {
       // ghost cursor until the 30s TTL sweep — that stale window
       // made "refresh to test" show one extra bubble per refresh.
       //
+      // Route through the queue so the delete observes wire order
+      // against any still-decrypting presence from the same peer.
+      // Without this, wire order presence→left lets the queued
+      // presence decrypt resolve AFTER the synchronous delete and
+      // re-insert the peer — reviving the ghost for a full TTL.
+      //
       // Protocol validation: require a non-empty string clientId.
       // Garbage from a non-conforming server or a buggy relay is
       // ignored rather than corrupting the presence map.
       const left = msg as unknown as Extract<RoomTransportMessage, { type: 'room.participant.left' }>;
-      if (typeof left.clientId === 'string' && left.clientId.length > 0) {
-        if (this.remotePresence.delete(left.clientId)) {
-          this.emitState();
+      this.enqueue(async () => {
+        if (typeof left.clientId === 'string' && left.clientId.length > 0) {
+          if (this.remotePresence.delete(left.clientId)) {
+            this.emitState();
+          }
         }
-      }
+      });
       return;
     }
   }
