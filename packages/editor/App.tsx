@@ -99,6 +99,8 @@ const App: React.FC = () => {
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
   const [showClaudeCodeWarning, setShowClaudeCodeWarning] = useState(false);
   const [showExitWarning, setShowExitWarning] = useState(false);
+  // When the warning dialog confirms, route to the handler matching the button that opened it.
+  const [exitWarningAction, setExitWarningAction] = useState<'close' | 'approve'>('close');
   const [showAgentWarning, setShowAgentWarning] = useState(false);
   const [agentWarningMessage, setAgentWarningMessage] = useState('');
   const [isPanelOpen, setIsPanelOpen] = useState(() => window.innerWidth >= 768);
@@ -541,6 +543,15 @@ const App: React.FC = () => {
   // Plan diff state — memoize filtered annotation lists to avoid new references per render
   const diffAnnotations = useMemo(() => allAnnotations.filter(a => !!a.diffContext), [allAnnotations]);
   const viewerAnnotations = useMemo(() => allAnnotations.filter(a => !a.diffContext), [allAnnotations]);
+  // Any-annotations flag used by Close/Approve/Send guards. Consolidates the
+  // four-term check that was inlined across the annotate-mode header + keyboard paths.
+  const hasAnyAnnotations = useMemo(
+    () => allAnnotations.length > 0
+      || editorAnnotations.length > 0
+      || linkedDocHook.docAnnotationCount > 0
+      || globalAttachments.length > 0,
+    [allAnnotations.length, editorAnnotations.length, linkedDocHook.docAnnotationCount, globalAttachments.length],
+  );
 
   // URL-based sharing
   const {
@@ -1045,19 +1056,9 @@ const App: React.FC = () => {
       // Annotate mode: gate-enabled + no annotations → approve (empty stdout).
       // Otherwise: send feedback.
       if (annotateMode) {
-        if (gate) {
-          const docAnnotations = linkedDocHook.getDocAnnotations();
-          const hasDocAnnotations = Array.from(docAnnotations.values()).some(
-            (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
-          );
-          const hasAnyAnnotations = allAnnotations.length > 0
-            || editorAnnotations.length > 0
-            || globalAttachments.length > 0
-            || hasDocAnnotations;
-          if (!hasAnyAnnotations) {
-            handleAnnotateApprove();
-            return;
-          }
+        if (gate && !hasAnyAnnotations) {
+          handleAnnotateApprove();
+          return;
         }
         handleAnnotateFeedback();
         return;
@@ -1090,7 +1091,7 @@ const App: React.FC = () => {
     showExport, showImport, showFeedbackPrompt, showClaudeCodeWarning, showExitWarning, showAgentWarning,
     showPermissionModeSetup, pendingPasteImage,
     submitted, isSubmitting, isExiting, isApiMode, linkedDocHook.isActive, annotations.length, externalAnnotations.length, annotateMode,
-    gate, globalAttachments.length, editorAnnotations.length,
+    gate, hasAnyAnnotations,
     origin, getAgentWarning,
   ]);
 
@@ -1455,25 +1456,24 @@ const App: React.FC = () => {
                   // Approve only when gate (review) mode is enabled (#570).
                   <>
                     <ExitButton
-                      onClick={() => (allAnnotations.length > 0 || editorAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0 || globalAttachments.length > 0) ? setShowExitWarning(true) : handleAnnotateExit()}
+                      onClick={() => {
+                        if (hasAnyAnnotations) {
+                          setExitWarningAction('close');
+                          setShowExitWarning(true);
+                        } else {
+                          handleAnnotateExit();
+                        }
+                      }}
                       disabled={isSubmitting || isExiting}
                       isLoading={isExiting}
                     />
-                    {(allAnnotations.length > 0 || editorAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0 || globalAttachments.length > 0) && (
+                    {hasAnyAnnotations && (
                       <FeedbackButton
                         onClick={handleAnnotateFeedback}
                         disabled={isSubmitting || isExiting}
                         isLoading={isSubmitting}
                         label="Send Annotations"
                         title="Send Annotations"
-                      />
-                    )}
-                    {gate && (
-                      <ApproveButton
-                        onClick={handleAnnotateApprove}
-                        disabled={isSubmitting || isExiting}
-                        isLoading={isSubmitting}
-                        title="Approve — no changes requested"
                       />
                     )}
                   </>
@@ -1498,9 +1498,21 @@ const App: React.FC = () => {
                   />
                 )}
 
-                {!annotateMode && <div className="relative group/approve">
+                {(!annotateMode || gate) && <div className="relative group/approve">
                   <ApproveButton
                     onClick={() => {
+                      // Annotate gate mode: guard against dropping annotations via the existing
+                      // showExitWarning dialog (routed via exitWarningAction='approve').
+                      if (annotateMode) {
+                        if (hasAnyAnnotations) {
+                          setExitWarningAction('approve');
+                          setShowExitWarning(true);
+                          return;
+                        }
+                        handleAnnotateApprove();
+                        return;
+                      }
+                      // Plan mode: existing Claude-Code / OpenCode guards.
                       if (origin === 'claude-code' && allAnnotations.length > 0) {
                         setShowClaudeCodeWarning(true);
                         return;
@@ -1515,11 +1527,12 @@ const App: React.FC = () => {
                       }
                       handleApprove();
                     }}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || (annotateMode && isExiting)}
                     isLoading={isSubmitting}
-                    dimmed={(origin === 'claude-code' || origin === 'gemini-cli') && allAnnotations.length > 0}
+                    dimmed={!annotateMode && (origin === 'claude-code' || origin === 'gemini-cli') && allAnnotations.length > 0}
+                    title={annotateMode ? 'Approve — no changes requested' : undefined}
                   />
-                  {(origin === 'claude-code' || origin === 'gemini-cli') && allAnnotations.length > 0 && (
+                  {!annotateMode && (origin === 'claude-code' || origin === 'gemini-cli') && allAnnotations.length > 0 && (
                     <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
                       <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
                       <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
@@ -1917,18 +1930,19 @@ const App: React.FC = () => {
           showCancel
         />
 
-        {/* Exit with annotations warning dialog */}
+        {/* Unsaved-annotations warning dialog — reused by Close and (in gate mode) Approve */}
         <ConfirmDialog
           isOpen={showExitWarning}
           onClose={() => setShowExitWarning(false)}
           onConfirm={() => {
             setShowExitWarning(false);
-            handleAnnotateExit();
+            if (exitWarningAction === 'approve') handleAnnotateApprove();
+            else handleAnnotateExit();
           }}
           title="Annotations Won't Be Sent"
-          message={<>You have {allAnnotations.length + editorAnnotations.length + linkedDocHook.docAnnotationCount + globalAttachments.length} annotation{(allAnnotations.length + editorAnnotations.length + linkedDocHook.docAnnotationCount + globalAttachments.length) !== 1 ? 's' : ''} that will be lost if you close.</>}
+          message={<>You have {allAnnotations.length + editorAnnotations.length + linkedDocHook.docAnnotationCount + globalAttachments.length} annotation{(allAnnotations.length + editorAnnotations.length + linkedDocHook.docAnnotationCount + globalAttachments.length) !== 1 ? 's' : ''} that will be lost if you {exitWarningAction === 'approve' ? 'approve' : 'close'}.</>}
           subMessage="To send your annotations, use Send Annotations instead."
-          confirmText="Close Anyway"
+          confirmText={exitWarningAction === 'approve' ? 'Approve Anyway' : 'Close Anyway'}
           cancelText="Cancel"
           variant="warning"
           showCancel
