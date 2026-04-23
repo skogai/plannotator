@@ -1,11 +1,11 @@
 /**
  * Parse CLI-style args arriving as a single whitespace-delimited string.
  *
- * Extracts the `--gate` and `--json` flags (issue #570) from the remainder,
- * which is treated as the target path. Leading `@` is stripped via the
- * shared at-reference helper — reference-mode is primary. Scoped-package-
- * style literal `@` paths are handled by a fallback that the downstream
- * resolver opts into (see at-reference.ts).
+ * Extracts the `--gate`, `--json`, and `--silent-approve` flags (issue #570)
+ * from the remainder, which is treated as the target path. Leading `@` is
+ * stripped via the shared at-reference helper — reference-mode is primary.
+ * Scoped-package-style literal `@` paths are handled by a fallback that the
+ * downstream resolver opts into (see at-reference.ts).
  *
  * Used by the OpenCode plugin and Pi extension, where the whole args string
  * arrives pre-joined from the harness slash-command dispatcher. The Claude
@@ -13,16 +13,16 @@
  * this helper.
  *
  * Implementation: walks the raw string once, preserving whitespace runs and
- * non-whitespace tokens as separate segments. Only `--gate` / `--json`
- * tokens (whole-word match) plus one adjacent whitespace run are removed.
+ * non-whitespace tokens as separate segments. Only known flag tokens
+ * (whole-word match) plus one adjacent whitespace run are removed.
  * This keeps double-spaces and tabs inside file paths intact — which
  * matches the pre-PR behavior on `main`, where OpenCode and Pi passed
  * the raw args string straight through to the filesystem resolver.
  *
- * Remaining edge: if a path literally contains `--gate` or `--json` as a
- * standalone whitespace-separated token (e.g. `"Feature --gate spec.md"`),
- * that token is stripped. Supporting this would need shell-style quoting,
- * which isn't worth the complexity for a vanishingly rare naming pattern.
+ * Remaining edge: if a path literally contains a known flag as a standalone
+ * whitespace-separated token (e.g. `"Feature --gate spec.md"`), that token
+ * is stripped. Supporting this would need shell-style quoting, which isn't
+ * worth the complexity for a vanishingly rare naming pattern.
  */
 
 import { stripAtPrefix } from "./at-reference";
@@ -42,14 +42,20 @@ export interface ParsedAnnotateArgs {
   rawFilePath: string;
   gate: boolean;
   json: boolean;
+  silentApprove: boolean;
 }
 
 type Segment = { type: "ws" | "tok"; text: string };
 
+const FLAG_MAP = {
+  "--gate": "gate",
+  "--json": "json",
+  "--silent-approve": "silentApprove",
+} as const satisfies Record<string, keyof Omit<ParsedAnnotateArgs, "filePath" | "rawFilePath">>;
+
 export function parseAnnotateArgs(raw: string): ParsedAnnotateArgs {
   const s = (raw ?? "").trim();
-  let gate = false;
-  let json = false;
+  const flags = { gate: false, json: false, silentApprove: false };
 
   const segments: Segment[] = [];
   for (let i = 0; i < s.length;) {
@@ -63,10 +69,10 @@ export function parseAnnotateArgs(raw: string): ParsedAnnotateArgs {
   for (let j = 0; j < segments.length; j++) {
     const seg = segments[j];
     if (seg.type !== "tok") continue;
-    if (seg.text !== "--gate" && seg.text !== "--json") continue;
+    const key = FLAG_MAP[seg.text as keyof typeof FLAG_MAP];
+    if (!key) continue;
 
-    if (seg.text === "--gate") gate = true;
-    else json = true;
+    flags[key] = true;
     keep[j] = false;
 
     // Drop one adjacent whitespace run so removed flags don't leave dangling
@@ -91,5 +97,5 @@ export function parseAnnotateArgs(raw: string): ParsedAnnotateArgs {
       .trim(),
   );
 
-  return { filePath: stripAtPrefix(rawFilePath), rawFilePath, gate, json };
+  return { filePath: stripAtPrefix(rawFilePath), rawFilePath, ...flags };
 }

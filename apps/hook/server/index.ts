@@ -126,21 +126,29 @@ const cliNoJina = noJinaIdx !== -1;
 if (cliNoJina) args.splice(noJinaIdx, 1);
 
 // Annotate review-gate flags (#570): --gate adds an Approve button,
-// --json switches stdout to structured decision output.
+// --json switches stdout to structured decision output, --silent-approve
+// suppresses the plaintext approve marker (naive hooks that treat any
+// stdout as a block signal opt in here to keep silence-is-permission).
 const gateIdx = args.indexOf("--gate");
 const gateFlag = gateIdx !== -1;
 if (gateFlag) args.splice(gateIdx, 1);
 const jsonIdx = args.indexOf("--json");
 const jsonFlag = jsonIdx !== -1;
 if (jsonFlag) args.splice(jsonIdx, 1);
+const silentApproveIdx = args.indexOf("--silent-approve");
+const silentApproveFlag = silentApproveIdx !== -1;
+if (silentApproveFlag) args.splice(silentApproveIdx, 1);
 
 // Stdout matrix for annotate / annotate-last / copilot annotate-last (#570).
 // Plaintext mode:
 //   - Close emits empty stdout (naive PostToolUse / Stop hooks: empty = allow).
 //   - Approve emits "The user approved." so agents and templates can
-//     distinguish approval from close without needing --json.
+//     distinguish approval from close without needing --json. With
+//     --silent-approve, Approve also emits empty stdout (hook-friendly).
 //   - Send Annotations emits the plaintext feedback markdown.
-// --json switches to structured output across all three decisions.
+// --json switches to structured output across all three decisions;
+// --silent-approve has no effect in --json mode (JSON always routes by
+// decision field, so there's no ambiguity to silence).
 export const APPROVED_PLAINTEXT_MARKER = "The user approved.";
 
 function emitAnnotateOutcome(result: {
@@ -160,7 +168,7 @@ function emitAnnotateOutcome(result: {
   }
   if (result.exit) return; // empty stdout on close
   if (result.approved) {
-    console.log(APPROVED_PLAINTEXT_MARKER);
+    if (!silentApproveFlag) console.log(APPROVED_PLAINTEXT_MARKER);
     return;
   }
   if (result.feedback) console.log(result.feedback);
