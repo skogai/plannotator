@@ -10,13 +10,17 @@
  * Code binary parses argv directly with indexOf/splice and does not use
  * this helper.
  *
- * Known limitation: this is a naive whitespace tokenizer. Paths that contain
- * consecutive whitespace (double-space, tabs) get their spacing collapsed,
- * and paths that literally contain `--gate`/`--json` as a whitespace-separated
- * substring (e.g. `"Feature --gate spec.md"`) have that token stripped. A
- * fuller shell-style tokenizer with quoting support would avoid both, but
- * the tradeoff isn't worth it — dev-context paths with those shapes are
- * vanishingly rare.
+ * Implementation: walks the raw string once, preserving whitespace runs and
+ * non-whitespace tokens as separate segments. Only `--gate` / `--json`
+ * tokens (whole-word match) plus one adjacent whitespace run are removed.
+ * This keeps double-spaces and tabs inside file paths intact — which
+ * matches the pre-PR behavior on `main`, where OpenCode and Pi passed
+ * the raw args string straight through to the filesystem resolver.
+ *
+ * Remaining edge: if a path literally contains `--gate` or `--json` as a
+ * standalone whitespace-separated token (e.g. `"Feature --gate spec.md"`),
+ * that token is stripped. Supporting this would need shell-style quoting,
+ * which isn't worth the complexity for a vanishingly rare naming pattern.
  */
 
 export interface ParsedAnnotateArgs {
@@ -25,13 +29,49 @@ export interface ParsedAnnotateArgs {
   json: boolean;
 }
 
+type Segment = { type: "ws" | "tok"; text: string };
+
 export function parseAnnotateArgs(raw: string): ParsedAnnotateArgs {
-  const tokens = (raw ?? "").trim().split(/\s+/).filter(Boolean);
-  const gate = tokens.includes("--gate");
-  const json = tokens.includes("--json");
-  const filePath = tokens
-    .filter((t) => t !== "--gate" && t !== "--json")
-    .join(" ")
+  const s = (raw ?? "").trim();
+  let gate = false;
+  let json = false;
+
+  const segments: Segment[] = [];
+  for (let i = 0; i < s.length;) {
+    const isWs = /\s/.test(s[i]);
+    const start = i;
+    while (i < s.length && /\s/.test(s[i]) === isWs) i++;
+    segments.push({ type: isWs ? "ws" : "tok", text: s.slice(start, i) });
+  }
+
+  const keep = segments.map(() => true);
+  for (let j = 0; j < segments.length; j++) {
+    const seg = segments[j];
+    if (seg.type !== "tok") continue;
+    if (seg.text !== "--gate" && seg.text !== "--json") continue;
+
+    if (seg.text === "--gate") gate = true;
+    else json = true;
+    keep[j] = false;
+
+    // Drop one adjacent whitespace run so removed flags don't leave dangling
+    // spaces. Prefer trailing whitespace; fall back to leading if at the end.
+    if (j + 1 < segments.length && segments[j + 1].type === "ws") {
+      keep[j + 1] = false;
+    } else if (j > 0 && segments[j - 1].type === "ws") {
+      keep[j - 1] = false;
+    }
+  }
+
+  // Trim covers the case where two adjacent flags (`... --gate --json`)
+  // both claim the single whitespace between them, leaving a trailing space
+  // after the kept token.
+  const filePath = segments
+    .filter((_, j) => keep[j])
+    .map((seg) => seg.text)
+    .join("")
+    .trim()
     .replace(/^@/, "");
+
   return { filePath, gate, json };
 }
