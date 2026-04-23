@@ -207,11 +207,6 @@ export async function startReviewServer(options: {
 	// the reviewer is currently looking at. Honors an explicit initialBase from
 	// the caller — e.g. programmatic Pi callers can request a non-detected base.
 	let currentBase = options.initialBase || options.gitContext?.defaultBranch || "main";
-	// Reflects the per-cwd gitContext after any worktree switches. Seeded from
-	// the startup value; updated in /api/diff/switch; returned by /api/diff GET
-	// so a refresh/reconnect rehydrates the sidebar to match the patch on
-	// screen. `hasLocalAccess` stays anchored to the startup gitContext.
-	let currentGitContext: GitContext | undefined = options.gitContext;
 
 	// Agent jobs — background process manager (late-binds serverUrl via getter)
 	let serverUrl = "";
@@ -221,7 +216,7 @@ export async function startReviewServer(options: {
 			const parsed = parseWorktreeDiffType(currentDiffType);
 			if (parsed) return parsed.path;
 		}
-		return currentGitContext?.cwd ?? process.cwd();
+		return options.gitContext?.cwd ?? process.cwd();
 	}
 	const tour = createTourSession();
 
@@ -517,7 +512,7 @@ export async function startReviewServer(options: {
 				// Echo the active base so page refresh/reconnect rehydrates the
 				// picker to what the server is actually using, not the detected default.
 				base: hasLocalAccess ? currentBase : undefined,
-				gitContext: hasLocalAccess ? currentGitContext : undefined,
+				gitContext: hasLocalAccess ? options.gitContext : undefined,
 				sharingEnabled,
 				shareBaseUrl,
 				pasteApiUrl,
@@ -541,12 +536,12 @@ export async function startReviewServer(options: {
 					json(res, { error: "Missing diffType" }, 400);
 					return;
 				}
-				const detectedBase = currentGitContext?.defaultBranch || "main";
+				const detectedBase = options.gitContext?.defaultBranch || "main";
 				const base = resolveBaseBranch(
 					typeof body.base === "string" ? body.base : undefined,
 					detectedBase,
 				);
-				const defaultCwd = currentGitContext?.cwd;
+				const defaultCwd = options.gitContext?.cwd;
 				const result = await runGitDiff(newType, base, defaultCwd);
 				currentPatch = result.patch;
 				currentGitRef = result.label;
@@ -554,14 +549,15 @@ export async function startReviewServer(options: {
 				currentBase = base;
 				currentError = result.error;
 
-				// Recompute gitContext for the effective cwd and commit it to
-				// server state so /api/diff GET rehydrates correctly on refresh.
-				// Best-effort: on failure we keep the previous currentGitContext.
-				if (currentGitContext) {
+				// Recompute gitContext for the effective cwd so the client's
+				// sidebar reflects the worktree we're now reviewing.
+				// Best-effort: on failure the client keeps its existing context.
+				let updatedContext: GitContext | undefined;
+				if (options.gitContext) {
 					try {
 						const worktreeParsed = parseWorktreeDiffType(newType);
-						const effectiveCwd = worktreeParsed?.path ?? currentGitContext.cwd;
-						currentGitContext = await getGitContextCore(reviewRuntime, effectiveCwd);
+						const effectiveCwd = worktreeParsed?.path ?? options.gitContext.cwd;
+						updatedContext = await getGitContextCore(reviewRuntime, effectiveCwd);
 					} catch {
 						/* best-effort */
 					}
@@ -571,11 +567,12 @@ export async function startReviewServer(options: {
 					rawPatch: currentPatch,
 					gitRef: currentGitRef,
 					diffType: currentDiffType,
-					// Echo the base the server is using. The resolver trusts the
-					// caller verbatim — echo lets the client confirm its request
-					// landed and resync if it ever didn't send one.
+					// Echo the base the server actually used. resolveBaseBranch
+					// trusts the caller verbatim; this echo lets the client
+					// confirm the request landed (and pick it up when the client
+					// didn't supply one and we fell back to detected default).
 					base: currentBase,
-					...(currentGitContext && hasLocalAccess ? { gitContext: currentGitContext } : {}),
+					...(updatedContext ? { gitContext: updatedContext } : {}),
 					...(currentError ? { error: currentError } : {}),
 				});
 			} catch (err) {
@@ -675,12 +672,12 @@ export async function startReviewServer(options: {
 
 			// Local mode first (matches Bun server priority)
 			if (hasLocalAccess && !isPRMode) {
-				const detectedBase = currentGitContext?.defaultBranch || "main";
+				const detectedBase = options.gitContext?.defaultBranch || "main";
 				const base = resolveBaseBranch(
 					url.searchParams.get("base") ?? undefined,
 					detectedBase,
 				);
-				const defaultCwd = currentGitContext?.cwd;
+				const defaultCwd = options.gitContext?.cwd;
 				const result = await getFileContentsForDiffCore(
 					reviewRuntime,
 					currentDiffType,

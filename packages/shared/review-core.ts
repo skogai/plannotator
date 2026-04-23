@@ -233,11 +233,14 @@ export async function getGitContext(
   ];
 
   // Always offer Branch diff / PR Diff when a default branch exists. The
-  // older guard hid them on the default branch because "vs <default>" from
-  // <default> is always empty — but with the base picker the user can
-  // meaningfully compare against any other branch from any branch. Preserving
-  // the mode across worktree switches + Pi's `initialBase` also require these
-  // options to be available regardless of the current branch.
+  // older guard hid them when the reviewer was on the default branch (the
+  // `vs <default>` diff from the default branch itself is always empty), but
+  // the base picker now lets reviewers compare against any branch from any
+  // branch, so there's no meaningless-by-construction option. Also: preserving
+  // diff mode across worktree switches and Pi's `initialBase` can land the
+  // reviewer on the default branch with branch/merge-base already active — the
+  // old guard hid the active mode's option, trapping them. Unconditional
+  // emission keeps the active option reachable in every flow.
   if (defaultBranch) {
     diffOptions.push({ id: "branch", label: `vs ${defaultBranch}` });
     diffOptions.push({ id: "merge-base", label: `Current PR Diff` });
@@ -462,10 +465,10 @@ export async function runGitDiff(
       }
 
       case "branch": {
-        // `--end-of-options` hardens against caller-supplied refs that start
-        // with `-` being parsed as git flags (e.g. `--output=...` would
-        // redirect diff output to an attacker-chosen path). Same pattern
-        // applied wherever user-controlled refs flow into git argv.
+        // `--end-of-options` hardens against a caller-supplied `defaultBranch`
+        // that starts with `-` being parsed as a git flag (e.g. `--output=...`
+        // would redirect diff output to an attacker-chosen path). Same pattern
+        // applied wherever user-controlled refs flow into a git argv.
         const branchDiffArgs = [
           "diff",
           "--no-ext-diff",

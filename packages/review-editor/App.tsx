@@ -980,10 +980,10 @@ const ReviewApp: React.FC = () => {
       setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef, diffType: data.diffType } : prev);
       setFiles(nextFiles);
       setDiffType(data.diffType);
-      // Sync our client state from the server's echo. The server trusts
-      // caller-supplied bases verbatim, so this normally just re-confirms
-      // what we sent — but it also covers the startup path where /api/diff
-      // seeded these from gitContext.defaultBranch.
+      // Adopt the server's echoed base. The server trusts whatever we sent
+      // verbatim — this sync just makes sure selectedBase and committedBase
+      // match the server's view (important when the caller didn't send a
+      // base and the server used the detected default instead).
       if (data.base) {
         setSelectedBase(data.base);
         setCommittedBase(data.base);

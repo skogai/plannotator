@@ -162,8 +162,9 @@ describe("review-core", () => {
 
     expect(result.patch).toBe("");
     expect(result.label).toBe("Error: branch");
-    // Error message is derived from the argv; check the meaningful parts
-    // rather than the exact string so harmless argv reorders don't break it.
+    // Error is derived from the argv — assert the meaningful parts rather
+    // than the exact string so harmless argv reorders (e.g. --end-of-options)
+    // don't break it.
     expect(result.error).toContain("git diff");
     expect(result.error).toContain("master..HEAD");
   });
