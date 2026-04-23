@@ -9,6 +9,14 @@
  * arrives pre-joined from the harness slash-command dispatcher. The Claude
  * Code binary parses argv directly with indexOf/splice and does not use
  * this helper.
+ *
+ * Known limitation: this is a naive whitespace tokenizer. Paths that contain
+ * consecutive whitespace (double-space, tabs) get their spacing collapsed,
+ * and paths that literally contain `--gate`/`--json` as a whitespace-separated
+ * substring (e.g. `"Feature --gate spec.md"`) have that token stripped. A
+ * fuller shell-style tokenizer with quoting support would avoid both, but
+ * the tradeoff isn't worth it — dev-context paths with those shapes are
+ * vanishingly rare.
  */
 
 export interface ParsedAnnotateArgs {
