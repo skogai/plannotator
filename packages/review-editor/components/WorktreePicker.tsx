@@ -173,7 +173,6 @@ const WorktreeRow: React.FC<WorktreeRowProps> = ({ label, sublabel, isSelected, 
     className={`w-full flex items-center gap-2 mx-1 px-2 py-1.5 text-xs text-left rounded hover:bg-muted focus:outline-none focus:bg-muted ${
       isSelected ? 'text-foreground font-medium' : 'text-foreground/80'
     }`}
-    style={{ width: 'calc(100% - 0.5rem)' }}
   >
     <span className="w-3 flex-shrink-0">
       {isSelected && (
