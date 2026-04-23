@@ -182,15 +182,18 @@ export class RoomDurableObject extends DurableObject<Env> {
   private async handleWebSocketUpgrade(_request: Request): Promise<Response> {
     const roomState = await this.ctx.storage.get<RoomDurableState>('room');
     if (!roomState) {
-      return Response.json({ error: 'Room not found' }, { status: 404 });
+      return this.rejectUpgradeAsUnavailable();
     }
     if (hasRoomExpired(roomState.expiresAt)) {
       // Alarm should have fired; this is defense in depth.
       await this.purgeRoom('upgrade-preempted-expired');
-      return Response.json({ error: 'Room not found' }, { status: 404 });
+      return this.rejectUpgradeAsUnavailable();
     }
 
     // Per-room connection cap — see MAX_CONNECTIONS_PER_ROOM for rationale.
+    // Kept as HTTP 429 (not a WS close) because "full" is a transient,
+    // retryable condition worth signaling to any consumer — distinct from
+    // the permanent "room unavailable" UX state below.
     if (this.ctx.getWebSockets().length >= MAX_CONNECTIONS_PER_ROOM) {
       safeLog('ws:room-full', { roomId: roomState.roomId, cap: MAX_CONNECTIONS_PER_ROOM });
       return Response.json({ error: 'Room is full' }, { status: 429 });
@@ -229,6 +232,26 @@ export class RoomDurableObject extends DurableObject<Env> {
     server.send(JSON.stringify(challenge));
 
     safeLog('ws:challenge-sent', { roomId: roomState.roomId, challengeId });
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /**
+   * Complete the WebSocket upgrade and immediately close the client side
+   * with WS_CLOSE_ROOM_UNAVAILABLE. Used when the room is gone (never
+   * created, admin-deleted, or auto-expired).
+   *
+   * Why not return HTTP 404? Browsers don't expose the HTTP status of a
+   * failed WebSocket upgrade to page JS — a failed upgrade fires `close`
+   * with code 1006 and no reason, indistinguishable from a network drop.
+   * Accepting and immediately closing with our dedicated close code is
+   * the only way the client can route cold visitors to the dedicated
+   * RoomUnavailableScreen on the same code path as mid-session closes.
+   */
+  private rejectUpgradeAsUnavailable(): Response {
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+    this.ctx.acceptWebSocket(server);
+    server.close(WS_CLOSE_ROOM_UNAVAILABLE, WS_CLOSE_REASON_ROOM_UNAVAILABLE);
     return new Response(null, { status: 101, webSocket: client });
   }
 
