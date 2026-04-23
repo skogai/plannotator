@@ -454,7 +454,11 @@ export async function startReviewServer(
               }
 
               const detectedBase = gitContext?.defaultBranch || "main";
-              const base = resolveBaseBranch(body.base, gitContext?.availableBranches, detectedBase);
+              // Guard against non-string payloads — resolveBaseBranch calls
+              // string methods and would throw a TypeError otherwise. Mirrors
+              // Pi's guard so both runtimes validate identically.
+              const requestedBase = typeof body.base === "string" ? body.base : undefined;
+              const base = resolveBaseBranch(requestedBase, gitContext?.availableBranches, detectedBase);
               const defaultCwd = gitContext?.cwd;
 
               // Run the new diff
