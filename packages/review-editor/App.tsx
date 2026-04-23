@@ -1081,6 +1081,7 @@ const ReviewApp: React.FC = () => {
       (activeDiffBase === 'branch' || activeDiffBase === 'merge-base')
         ? committedBase ?? undefined
         : undefined,
+    feedbackDiffContext,
     allAnnotations,
     externalAnnotations,
     selectedAnnotationId,
@@ -1123,7 +1124,7 @@ const ReviewApp: React.FC = () => {
   }), [
     files, activeFileIndex, diffStyle, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
-    diffFontFamily, diffFontSize, activeDiffBase, committedBase,
+    diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext,
     allAnnotations, externalAnnotations,
     selectedAnnotationId, pendingSelection, handleLineSelection,
     handleAddAnnotation, handleAddFileComment, handleEditAnnotation,

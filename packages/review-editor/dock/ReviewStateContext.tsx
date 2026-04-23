@@ -5,6 +5,7 @@ import type { DiffFile } from '../types';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { ReviewSearchMatch } from '../utils/reviewSearch';
 import type { PRMetadata, PRContext } from '@plannotator/shared/pr-provider';
+import type { FeedbackDiffContext } from '../utils/exportFeedback';
 
 /**
  * Shared review state consumed by dockview panel wrappers.
@@ -28,6 +29,9 @@ export interface ReviewState {
   fontSize?: string;
   /** User-selected base branch; feeds the `base` query param on file-content fetches. */
   reviewBase?: string;
+  /** Diff context baked into exported feedback so downstream panels (agent job
+   * detail, etc.) produce the same markdown the main feedback path sends. */
+  feedbackDiffContext?: FeedbackDiffContext;
 
   // Annotations
   allAnnotations: CodeAnnotation[];

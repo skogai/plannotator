@@ -177,7 +177,11 @@ export function resolveBaseBranch(
   // happens in fresh clones where local tracking branches were never created.
   const prefixed = `origin/${requested}`;
   if (flat.includes(prefixed)) return prefixed;
-  return detected;
+  // Unknown refs — trust the caller. Could be a tag, SHA, or a ref under a
+  // non-tracked remote. Git will error naturally if it's truly invalid;
+  // silently swapping to `detected` would hide the caller's intent and
+  // produce a patch that contradicts what the server already computed.
+  return requested;
 }
 
 export async function getWorktrees(

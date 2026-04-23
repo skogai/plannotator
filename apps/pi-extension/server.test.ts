@@ -364,15 +364,17 @@ describe("pi review server", () => {
       };
       expect(rehydrate.base).toBe("develop");
 
-      // Unknown base falls back to the detected default, and the response
-      // echoes the resolved value so the client can resync.
-      const fallbackResponse = await fetch(`${server.url}/api/diff/switch`, {
+      // Unknown refs pass through verbatim — the resolver trusts callers so
+      // unusual-but-valid refs (tags, SHAs, non-origin remotes) work. Truly
+      // invalid refs surface via the diff error, not via a silent swap.
+      const unknownResponse = await fetch(`${server.url}/api/diff/switch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ diffType: "branch", base: "nope-does-not-exist" }),
       });
-      const fallback = await fallbackResponse.json() as { base?: string };
-      expect(fallback.base).toBe(gitContext.defaultBranch);
+      const unknown = await unknownResponse.json() as { base?: string; error?: string };
+      expect(unknown.base).toBe("nope-does-not-exist");
+      expect(unknown.error).toBeTruthy();
 
       // Feedback to clean up the waitForDecision promise.
       await fetch(`${server.url}/api/feedback`, {

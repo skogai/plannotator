@@ -97,6 +97,7 @@ export const DiffTypePicker: React.FC<DiffTypePickerProps> = ({
                     <span
                       className="flex-shrink-0 text-muted-foreground hover:text-foreground"
                       onPointerDown={(e) => e.stopPropagation()}
+                      onPointerUp={(e) => e.stopPropagation()}
                       onClick={(e) => e.stopPropagation()}
                     >
                       {/* Heroicons information-circle (outline) */}

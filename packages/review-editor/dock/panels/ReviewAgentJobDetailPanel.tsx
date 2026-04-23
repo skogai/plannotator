@@ -88,8 +88,11 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
   }, [state.openDiffFile, state.onSelectAnnotation]);
 
   const copyAllText = useMemo(
-    () => activeAnnotations.length > 0 ? exportReviewFeedback(activeAnnotations, state.prMetadata) : '',
-    [activeAnnotations, state.prMetadata]
+    () =>
+      activeAnnotations.length > 0
+        ? exportReviewFeedback(activeAnnotations, state.prMetadata, state.feedbackDiffContext)
+        : '',
+    [activeAnnotations, state.prMetadata, state.feedbackDiffContext],
   );
 
   const { jobLogs } = useJobLogs();
