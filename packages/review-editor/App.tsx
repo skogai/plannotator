@@ -670,6 +670,7 @@ const ReviewApp: React.FC = () => {
         gitRef: string;
         origin?: Origin;
         diffType?: string;
+        base?: string;
         gitContext?: GitContext;
         agentCwd?: string;
         sharingEnabled?: boolean;
@@ -700,7 +701,10 @@ const ReviewApp: React.FC = () => {
         if (data.diffType) setDiffType(data.diffType);
         if (data.gitContext) {
           setGitContext(data.gitContext);
-          setSelectedBase(data.gitContext.defaultBranch || null);
+          // Prefer the server's active base (survives page refresh / reconnect)
+          // over the detected default, so the picker rehydrates to what the
+          // server is actually using.
+          setSelectedBase(data.base || data.gitContext.defaultBranch || null);
         }
         if (data.agentCwd) setAgentCwd(data.agentCwd);
         if (data.sharingEnabled !== undefined) setSharingEnabled(data.sharingEnabled);
@@ -953,6 +957,7 @@ const ReviewApp: React.FC = () => {
         rawPatch: string;
         gitRef: string;
         diffType: string;
+        base?: string;
         error?: string;
       };
 
@@ -962,6 +967,8 @@ const ReviewApp: React.FC = () => {
       setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef, diffType: data.diffType } : prev);
       setFiles(nextFiles);
       setDiffType(data.diffType);
+      // Resync in case the server resolved to something different (fallback).
+      if (data.base) setSelectedBase(data.base);
       setActiveFileIndex(0);
       setPendingSelection(null);
       setDiffError(data.error || null);

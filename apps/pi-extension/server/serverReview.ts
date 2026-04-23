@@ -484,6 +484,9 @@ export async function startReviewServer(options: {
 				gitRef: currentGitRef,
 				origin: options.origin ?? "pi",
 				diffType: hasLocalAccess ? currentDiffType : undefined,
+				// Echo the active base so page refresh/reconnect rehydrates the
+				// picker to what the server is actually using, not the detected default.
+				base: hasLocalAccess ? currentBase : undefined,
 				gitContext: hasLocalAccess ? options.gitContext : undefined,
 				sharingEnabled,
 				shareBaseUrl,
@@ -525,6 +528,9 @@ export async function startReviewServer(options: {
 					rawPatch: currentPatch,
 					gitRef: currentGitRef,
 					diffType: currentDiffType,
+					// Echo the resolved base — the server may have fallen back
+					// to the detected default if the requested base was unknown.
+					base: currentBase,
 					...(currentError ? { error: currentError } : {}),
 				});
 			} catch (err) {
