@@ -79,13 +79,16 @@ export async function getDefaultBranch(
   runtime: ReviewGitRuntime,
   cwd?: string,
 ): Promise<string> {
+  // Prefer the remote tracking ref (e.g. `origin/main`) so diffs run against
+  // the upstream tip, not a potentially stale local copy. Only fall back to
+  // a local ref when there's no remote configured at all.
   const remoteHead = await runtime.runGit(
     ["symbolic-ref", "refs/remotes/origin/HEAD"],
     { cwd },
   );
   if (remoteHead.exitCode === 0) {
     const ref = remoteHead.stdout.trim();
-    if (ref) return ref.replace("refs/remotes/origin/", "");
+    if (ref) return ref.replace("refs/remotes/", "");
   }
 
   const mainBranch = await runtime.runGit(
@@ -131,18 +134,13 @@ export async function listBranches(
     }
   }
 
-  // Dedupe `origin/foo` when local `foo` exists — the local ref is what users
-  // pick. Remotes without a local counterpart stay.
-  const dedupedRemote = remote.filter((r) => {
-    const slash = r.indexOf("/");
-    const stripped = slash !== -1 ? r.slice(slash + 1) : r;
-    return !localSet.has(stripped);
-  });
-
+  // Keep both local and remote refs — they can point to different commits
+  // (stale local tracking branches are common) and users need to be able to
+  // pick either explicitly. The picker groups them separately for clarity.
   local.sort();
-  dedupedRemote.sort();
+  remote.sort();
 
-  return { local, remote: dedupedRemote };
+  return { local, remote };
 }
 
 /**
@@ -160,10 +158,14 @@ export function resolveBaseBranch(
   if (!available) return requested;
   const flat = [...available.local, ...available.remote];
   if (flat.includes(requested)) return requested;
-  // Accept `origin/foo` when user typed it but only the local `foo` is tracked.
+  // Try stripping a remote prefix (`origin/foo` → `foo`) when only the local exists.
   const slash = requested.indexOf("/");
   const stripped = slash !== -1 ? requested.slice(slash + 1) : requested;
   if (flat.includes(stripped)) return stripped;
+  // Try adding an `origin/` prefix (`foo` → `origin/foo`) when only the remote exists —
+  // happens in fresh clones where local tracking branches were never created.
+  const prefixed = `origin/${requested}`;
+  if (flat.includes(prefixed)) return prefixed;
   return detected;
 }
 
@@ -226,7 +228,13 @@ export async function getGitContext(
     { id: "last-commit", label: "Last commit" },
   ];
 
-  if (currentBranch !== defaultBranch) {
+  // `defaultBranch` may be a remote ref like `origin/main` while `currentBranch`
+  // is the bare local name — treat `origin/X` and `X` as equivalent so we don't
+  // surface base-vs-base diff options when the user is actually on the default branch.
+  const onDefaultBranch =
+    currentBranch === defaultBranch ||
+    `origin/${currentBranch}` === defaultBranch;
+  if (!onDefaultBranch) {
     diffOptions.push({ id: "branch", label: `vs ${defaultBranch}` });
     diffOptions.push({ id: "merge-base", label: `Current PR Diff` });
   }
