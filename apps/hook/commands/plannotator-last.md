@@ -10,6 +10,6 @@ disable-model-invocation: true
 
 ## Your task
 
-If the output above is empty, the user closed the annotation session without providing feedback. Acknowledge with a single sentence ("Annotation session closed.") and stop. Do not begin any work.
+If the output above is empty, OR is a JSON object whose `"decision"` is `"approved"` or `"dismissed"`, the user closed the annotation session without requesting changes. Acknowledge with a single sentence ("Annotation session closed.") and stop. Do not begin any work.
 
-Otherwise, address the annotation feedback above. The user has reviewed your last message and provided specific annotations and comments.
+Otherwise the output is either plaintext annotation feedback or a JSON object with `"decision": "annotated"` and a `"feedback"` field. Address the feedback — the user has reviewed your last message and provided specific annotations and comments.
