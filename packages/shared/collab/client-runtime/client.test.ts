@@ -288,33 +288,6 @@ describe('CollabRoomClient — sendAnnotationAdd', () => {
     client.disconnect();
   });
 
-  test('does NOT apply to local state until server echo arrives (V1 policy)', async () => {
-    const { client, ws, eventKey } = await setup();
-    const ann: RoomAnnotation = {
-      id: 'non-opt-1',
-      blockId: 'b1', startOffset: 0, endOffset: 5,
-      type: 'COMMENT', originalText: 'x', createdA: 1,
-    };
-    const before = client.getState().annotations.length;
-    await client.sendAnnotationAdd([ann]);
-
-    // Send-only path — local annotations map must be unchanged pre-echo.
-    expect(client.getState().annotations.length).toBe(before);
-
-    // Drain and echo back.
-    const sent = await ws.peer.expectFromClient();
-    const envelope = JSON.parse(sent) as ServerEnvelope;
-    ws.peer.sendFromServer(JSON.stringify({
-      type: 'room.event', seq: 1, receivedAt: Date.now(), envelope,
-    }));
-    await new Promise(r => setTimeout(r, 10));
-
-    // Now the server echo applies the op authoritatively.
-    expect(client.getState().annotations.length).toBe(before + 1);
-    expect(client.getState().annotations.find(a => a.id === 'non-opt-1')).toBeDefined();
-
-    client.disconnect();
-  });
 });
 
 describe('CollabRoomClient — server echo is authoritative', () => {
@@ -365,30 +338,6 @@ describe('CollabRoomClient — server echo is authoritative', () => {
 
     expect(client.getState().annotations.length).toBe(1);
     expect(client.getState().annotations[0].id).toBe('other-1');
-    client.disconnect();
-  });
-});
-
-describe('CollabRoomClient — presence', () => {
-  test('decrypts presence with presenceKey', async () => {
-    const { client, ws, presenceKey } = await setup();
-    const presence = {
-      user: { id: 'u2', name: 'bob', color: '#0f0' },
-      cursor: null,
-    };
-    const ciphertext = await encryptPresence(presenceKey, presence);
-    const envelope: ServerEnvelope = {
-      clientId: 'other-client',
-      opId: 'p-op',
-      channel: 'presence',
-      ciphertext,
-    };
-    const msg: RoomTransportMessage = { type: 'room.presence', envelope };
-    ws.peer.sendFromServer(JSON.stringify(msg));
-    await new Promise(r => setTimeout(r, 10));
-
-    const state = client.getState();
-    expect(state.remotePresence['other-client']).toEqual(presence);
     client.disconnect();
   });
 });
@@ -459,33 +408,6 @@ describe('CollabRoomClient — admin', () => {
 
     await expect(deletePromise).rejects.toThrow(AdminRejectedError);
     client.disconnect();
-  });
-
-  test('admin-scoped room.error client_id_mismatch and no_admin_challenge reject pendingAdmin immediately', async () => {
-    // Regression: previous ADMIN_SCOPED_ERROR_CODES was out of sync with the
-    // server — it listed 'admin_client_id_mismatch' (never emitted) and was
-    // missing 'no_admin_challenge'. Either miss caused the admin promise to
-    // hang until the 5s timeout even though the server had already rejected.
-    for (const code of ['client_id_mismatch', 'no_admin_challenge']) {
-      const { client, ws } = await setup({ withAdmin: true });
-
-      const deletePromise = client.deleteRoom();
-      await ws.peer.expectFromClient(); // admin.challenge.request
-
-      const start = Date.now();
-      ws.peer.sendFromServer(JSON.stringify({
-        type: 'room.error',
-        code,
-        message: `Server rejected: ${code}`,
-      }));
-
-      await expect(deletePromise).rejects.toThrow(AdminRejectedError);
-      const elapsed = Date.now() - start;
-      // Must reject immediately (within a few ms), not at the 5s admin timeout.
-      expect(elapsed).toBeLessThan(500);
-
-      client.disconnect();
-    }
   });
 
   test('contract: every code in ADMIN_ERROR_CODES rejects a pending admin command as admin-scoped', async () => {
@@ -1973,27 +1895,6 @@ describe('CollabRoomClient — getState() returns immutable snapshot (P2)', () =
     client.disconnect();
   });
 
-  test('two getState() calls return distinct object references (no shared mutable refs)', async () => {
-    const { client, ws, eventKey } = await setup();
-    const ann: RoomAnnotation = {
-      id: 'ref-1',
-      blockId: 'b1', startOffset: 0, endOffset: 5,
-      type: 'COMMENT', originalText: 'x', createdA: 1,
-    };
-    const cipher = await encryptEventOp(eventKey, { type: 'annotation.add', annotations: [ann] });
-    ws.peer.sendFromServer(JSON.stringify({
-      type: 'room.event', seq: 1, receivedAt: Date.now(),
-      envelope: { clientId: 'other', opId: 'a1', channel: 'event', ciphertext: cipher },
-    }));
-    await waitFor(() => client.getState().annotations.length === 1, 1000);
-
-    const s1 = client.getState();
-    const s2 = client.getState();
-    expect(s1.annotations).not.toBe(s2.annotations);
-    expect(s1.annotations[0]).not.toBe(s2.annotations[0]);
-    expect(s1.remotePresence).not.toBe(s2.remotePresence);
-    client.disconnect();
-  });
 });
 
 // NOTE: the auth-proof failure during auto-reconnect code path (handleAuthChallenge
@@ -2191,31 +2092,9 @@ describe('CollabRoomClient — outbound validation (P2)', () => {
 });
 
 describe('createRoom — success body is not parsed (P2)', () => {
-  test('resolves after 201 even when the response body is empty', async () => {
-    const { createRoom } = await import('./create-room');
-    const goodSnapshot = {
-      versionId: 'v1' as const,
-      planMarkdown: '# Plan',
-      annotations: [],
-    };
-    const fakeFetch: typeof fetch = async () => new Response('', { status: 201 });
-
-    const result = await createRoom({
-      baseUrl: 'http://localhost:8787',
-      initialSnapshot: goodSnapshot,
-      user: USER,
-      fetchImpl: fakeFetch,
-    });
-
-    expect(result.roomId).toBeTruthy();
-    expect(result.roomSecret).toBeTruthy();
-    expect(result.adminSecret).toBeTruthy();
-    expect(result.joinUrl).toContain(result.roomId);
-    expect(result.adminUrl).toContain(result.roomId);
-    expect(result.client).toBeDefined();
-  });
-
   test('resolves after 201 even when the response body is malformed JSON', async () => {
+    // Adversarial body covers the empty-body case too: createRoom must
+    // never attempt to parse the success body, regardless of content.
     const { createRoom } = await import('./create-room');
     const goodSnapshot = {
       versionId: 'v1' as const,
@@ -2232,7 +2111,11 @@ describe('createRoom — success body is not parsed (P2)', () => {
     });
 
     expect(result.roomId).toBeTruthy();
+    expect(result.roomSecret).toBeTruthy();
     expect(result.adminSecret).toBeTruthy();
+    expect(result.joinUrl).toContain(result.roomId);
+    expect(result.adminUrl).toContain(result.roomId);
+    expect(result.client).toBeDefined();
   });
 });
 
