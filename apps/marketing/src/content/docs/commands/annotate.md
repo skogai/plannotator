@@ -94,12 +94,49 @@ When annotating an HTML file or URL (not plain markdown), a small badge appears 
 
 The annotation UI in annotate mode works the same as plan review, with a few changes:
 
-- The "Approve" button is hidden (there's nothing to approve)
+- The "Approve" button is hidden by default (there's nothing to approve for most use cases). Pass `--gate` to enable it as a review decision.
 - "Send Feedback" becomes **"Send Annotations"**
 - `Cmd/Ctrl+Enter` sends annotations instead of approving
 - The completion screen says "Annotations Sent" instead of "Plan Approved"
 
 All annotation types work identically: deletions, replacements, comments, insertions, global comments, and image attachments.
+
+## Flags
+
+Two opt-in flags turn annotate into a review gate for hook integrations (spec-driven frameworks, turn-by-turn review, and so on). They are orthogonal: you can use either alone or combine them.
+
+### `--gate`
+
+Adds a third **Approve** button to the UI. The reviewer now has three exits:
+
+- **Approve** — the artifact looks good; the agent should proceed.
+- **Send Annotations** — changes requested; feedback goes back to the agent.
+- **Close** — dismissed without deciding.
+
+### `--json`
+
+Switches stdout to a structured decision object so hooks can route programmatically:
+
+```json
+{ "decision": "approved" | "annotated" | "dismissed", "feedback": "..." }
+```
+
+`feedback` is only present when `decision === "annotated"`.
+
+### Stdout matrix
+
+| Flags | UX | Approve | Close | Send Annotations |
+|---|---|---|---|---|
+| *(none)* | 2-button | n/a | empty | feedback (plaintext) |
+| `--gate` | 3-button | empty | empty | feedback (plaintext) |
+| `--json` | 2-button | n/a | `{"decision":"dismissed"}` | `{"decision":"annotated","feedback":"..."}` |
+| `--gate --json` | 3-button | `{"decision":"approved"}` | `{"decision":"dismissed"}` | `{"decision":"annotated","feedback":"..."}` |
+
+**Key property:** in `--gate` mode without `--json`, Approve and Close both emit empty stdout, so naive PostToolUse / Stop hooks (empty = allow, non-empty = block) work with no parsing. Only Send Annotations blocks. Add `--json` when you need explicit approved-vs-dismissed telemetry.
+
+On OpenCode and Pi, `--json` is silently accepted because those harnesses write back into the session directly rather than via stdout. The `--gate` flag behaves identically across all three harnesses.
+
+See [Hook integration recipes](/docs/guides/hook-integration/) for ready-to-use PostToolUse and Stop hook examples.
 
 ## Feedback format
 
@@ -128,8 +165,9 @@ The agent receives this and can act on each annotation.
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/api/plan` | GET | Returns `{ plan, mode: "annotate", filePath, sourceInfo }` |
+| `/api/plan` | GET | Returns `{ plan, mode: "annotate", filePath, sourceInfo, gate }` |
 | `/api/feedback` | POST | Submit annotations |
+| `/api/approve` | POST | Approve without feedback (`--gate` UX) |
 | `/api/exit` | POST | Close session without feedback |
 | `/api/image` | GET | Serve image by path |
 | `/api/upload` | POST | Upload image attachment |
