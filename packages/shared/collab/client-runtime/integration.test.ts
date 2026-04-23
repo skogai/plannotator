@@ -81,7 +81,7 @@ describeFn('CollabRoomClient integration (against wrangler dev)', () => {
       // Admin deletes the room
       await adminClient.deleteRoom();
       await new Promise(r => setTimeout(r, 500));
-      expect(adminClient.getState().roomStatus).toBe('deleted');
+      expect(adminClient.getState().roomUnavailable).toBe(true);
     } finally {
       safeDisconnect(creator);
       safeDisconnect(participant);

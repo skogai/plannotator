@@ -1002,11 +1002,10 @@ export class CollabRoomClient {
     // (correctly) omitted, the server will send us a snapshot next; that
     // snapshot's apply is what clears the flag. Clearing here would leave
     // a window where post-accept events apply on stale local state.
-    // Settle roomStatus and clear lastError BEFORE transitioning to
-    // 'authenticated'. setStatus() emits the `state` event; if we flipped to
-    // 'authenticated' first, subscribers would briefly see
-    // connectionStatus='authenticated' with roomStatus=null (or stale
-    // lastError) — a confusing intermediate state for UI consumers.
+    // Clear lastError BEFORE transitioning to 'authenticated'. setStatus()
+    // emits the `state` event; if we flipped to 'authenticated' first,
+    // subscribers would briefly see connectionStatus='authenticated' with a
+    // stale lastError — a confusing intermediate state for UI consumers.
     this.lastError = null;
     this.setStatus('authenticated');
     // this.seq means "last server seq consumed by this client".
