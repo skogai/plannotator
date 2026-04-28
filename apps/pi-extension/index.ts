@@ -35,7 +35,7 @@ import { planDenyFeedback } from "./generated/feedback-templates.js";
 import { hasMarkdownFiles, resolveUserPath } from "./generated/resolve-file.js";
 import { FILE_BROWSER_EXCLUDED } from "./generated/reference-common.js";
 import { htmlToMarkdown } from "./generated/html-to-markdown.js";
-import { urlToMarkdown } from "./generated/url-to-markdown.js";
+import { urlToMarkdown, isConvertedSource } from "./generated/url-to-markdown.js";
 import { loadConfig, resolveUseJina } from "./generated/config.js";
 import { parseAnnotateArgs } from "./generated/annotate-args.js";
 import { resolveAtReference } from "./generated/at-reference.js";
@@ -373,7 +373,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				try {
 					const result = await urlToMarkdown(filePath, { useJina });
 					markdown = result.markdown;
-					sourceConverted = result.source === "jina" || result.source === "fetch+turndown";
+					sourceConverted = isConvertedSource(result.source);
 				} catch (err) {
 					ctx.ui.notify(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`, "error");
 					return;
