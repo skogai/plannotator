@@ -181,13 +181,13 @@ export async function handleAnnotateCommand(
     try {
       const result = await urlToMarkdown(filePath, { useJina });
       markdown = result.markdown;
+      sourceConverted = result.source === "jina" || result.source === "fetch+turndown";
     } catch (err) {
       client.app.log({ level: "error", message: `Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}` });
       return;
     }
     absolutePath = filePath;
     sourceInfo = filePath;
-    sourceConverted = true;
   } else {
     const projectRoot = directory || process.cwd();
     const resolvedArg = resolveUserPath(filePath, projectRoot);

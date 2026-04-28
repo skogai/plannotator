@@ -591,6 +591,7 @@ if (args[0] === "sessions") {
     try {
       const result = await urlToMarkdown(filePath, { useJina });
       markdown = result.markdown;
+      sourceConverted = result.source === "jina" || result.source === "fetch+turndown";
       if (process.env.PLANNOTATOR_DEBUG) {
         console.error(`[DEBUG] Fetched via ${result.source} (${markdown.length} chars)`);
       }
@@ -600,7 +601,6 @@ if (args[0] === "sessions") {
     }
     absolutePath = filePath; // Use URL as the "path" for display
     sourceInfo = filePath;   // Full URL for source attribution
-    sourceConverted = true;
   } else {
     // Folder check with literal-@ fallback for scoped-package-style names.
     const folderCandidate = resolveAtReference(rawFilePath, (c) => {

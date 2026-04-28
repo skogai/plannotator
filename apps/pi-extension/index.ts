@@ -373,13 +373,13 @@ export default function plannotator(pi: ExtensionAPI): void {
 				try {
 					const result = await urlToMarkdown(filePath, { useJina });
 					markdown = result.markdown;
+					sourceConverted = result.source === "jina" || result.source === "fetch+turndown";
 				} catch (err) {
 					ctx.ui.notify(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`, "error");
 					return;
 				}
 				absolutePath = filePath;
 				sourceInfo = filePath;
-				sourceConverted = true;
 			} else {
 				// Pick the interpretation of the user input that actually exists:
 				// stripped form first (reference-mode primary), literal as fallback
