@@ -466,8 +466,9 @@ export interface ExportAnnotationsOptions {
 const blockEndLine = (block: Block): number => {
   if (!block.content) return block.startLine;
   const contentLines = block.content.split('\n').length;
-  // Code block startLine is the opening fence; content excludes both fences
   if (block.type === 'code') return block.startLine + contentLines + 1;
+  if (block.type === 'directive') return block.startLine + contentLines + 1;
+  if (block.alertKind) return block.startLine + contentLines;
   return block.startLine + contentLines - 1;
 };
 
