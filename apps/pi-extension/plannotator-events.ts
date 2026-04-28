@@ -272,6 +272,7 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 						request.respond({ status: "error", error: "Missing filePath for annotate request." });
 						return;
 					}
+					const sourceConverted = /\.html?$/i.test(payload.filePath) || /^https?:\/\//i.test(payload.filePath);
 					const result = await openMarkdownAnnotation(
 						ctx,
 						payload.filePath,
@@ -279,7 +280,7 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 						payload.mode ?? "annotate",
 						payload.folderPath,
 						undefined,
-						undefined,
+						sourceConverted,
 						payload.gate,
 					);
 					request.respond({ status: "handled", result });
