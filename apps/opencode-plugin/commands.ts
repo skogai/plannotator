@@ -174,6 +174,7 @@ export async function handleAnnotateCommand(
   let absolutePath: string;
   let folderPath: string | undefined;
   let annotateMode: "annotate" | "annotate-folder" = "annotate";
+  let isFolder = false;
   let sourceInfo: string | undefined;
   let sourceConverted = false;
 
@@ -197,7 +198,6 @@ export async function handleAnnotateCommand(
     const projectRoot = directory || process.cwd();
     const resolvedArg = resolveUserPath(filePath, projectRoot);
 
-    let isFolder = false;
     try {
       isFolder = statSync(resolvedArg).isDirectory();
     } catch {
