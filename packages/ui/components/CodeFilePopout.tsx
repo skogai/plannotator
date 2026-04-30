@@ -390,7 +390,8 @@ export const CodeFilePopout: React.FC<CodeFilePopoutProps> = ({
     openCommentForRange(
       { start: anchorLine, end: focusLine },
       undefined,
-      selection.rangeCount > 0 ? selection.getRangeAt(0).getBoundingClientRect() : undefined,
+      lastPointerRectRef.current
+        ?? (selection.rangeCount > 0 ? selection.getRangeAt(0).getBoundingClientRect() : undefined),
     );
     selection.removeAllRanges();
   }, [onAddAnnotation, openCommentForRange]);
