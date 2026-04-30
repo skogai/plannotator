@@ -1,4 +1,5 @@
 import React from "react";
+import { isCodeFilePath } from "@plannotator/shared/code-file";
 import { transformPlainText } from "../utils/inlineTransforms";
 import { getImageSrc } from "./ImageThumbnail";
 
@@ -85,11 +86,12 @@ function emitPlainTextWithBareUrls(
 export const InlineMarkdown: React.FC<{
   text: string;
   onOpenLinkedDoc?: (path: string) => void;
+  onOpenCodeFile?: (path: string) => void;
   onNavigateAnchor?: (hash: string) => void;
   imageBaseDir?: string;
   onImageClick?: (src: string, alt: string) => void;
   githubRepo?: string;
-}> = ({ text, onOpenLinkedDoc, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo }) => {
+}> = ({ text, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo }) => {
   const parts: React.ReactNode[] = [];
   let remaining = text;
   let key = 0;
@@ -180,6 +182,7 @@ export const InlineMarkdown: React.FC<{
             onImageClick={onImageClick}
             text={match[1]}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
           />
@@ -201,6 +204,7 @@ export const InlineMarkdown: React.FC<{
               onImageClick={onImageClick}
               text={match[1]}
               onOpenLinkedDoc={onOpenLinkedDoc}
+              onOpenCodeFile={onOpenCodeFile}
               onNavigateAnchor={onNavigateAnchor}
               githubRepo={githubRepo}
             />
@@ -222,6 +226,7 @@ export const InlineMarkdown: React.FC<{
             onImageClick={onImageClick}
             text={match[1]}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
           />
@@ -242,6 +247,7 @@ export const InlineMarkdown: React.FC<{
             onImageClick={onImageClick}
             text={match[1]}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
           />
@@ -263,6 +269,7 @@ export const InlineMarkdown: React.FC<{
             onImageClick={onImageClick}
             text={match[1]}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
           />
@@ -505,7 +512,9 @@ export const InlineMarkdown: React.FC<{
         /\.(mdx?|html?)(#.*)?$/i.test(linkUrl) &&
         !linkUrl.startsWith("http://") &&
         !linkUrl.startsWith("https://");
+      const isCodeFile = !isLocalDoc && isCodeFilePath(linkUrl);
       const linkedDocPath = isLocalDoc ? linkUrl.replace(/#.*$/, '') : linkUrl;
+      const codeFilePath = isCodeFile ? linkUrl.replace(/#.*$/, '') : linkUrl;
       const isInPageAnchor = safeLinkUrl.startsWith('#');
 
       if (isInPageAnchor) {
@@ -551,6 +560,31 @@ export const InlineMarkdown: React.FC<{
             </svg>
           </a>,
         );
+      } else if (isCodeFile && onOpenCodeFile) {
+        parts.push(
+          <a
+            key={key++}
+            href={safeLinkUrl}
+            onClick={(e) => {
+              e.preventDefault();
+              onOpenCodeFile(codeFilePath);
+            }}
+            className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer"
+            title={`View: ${linkUrl}`}
+          >
+            {linkText}
+            <svg
+              className="w-3 h-3 opacity-50 flex-shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+            </svg>
+          </a>,
+        );
       } else if (isLocalDoc) {
         // No handler — render as plain link (e.g., in shared/portal views)
         parts.push(
@@ -590,6 +624,7 @@ export const InlineMarkdown: React.FC<{
             key={key++}
             text={before}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
             imageBaseDir={imageBaseDir}

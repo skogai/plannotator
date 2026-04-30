@@ -52,6 +52,7 @@ import { deriveImageName } from '@plannotator/ui/components/AttachmentsButton';
 import { useSidebar, type SidebarTab } from '@plannotator/ui/hooks/useSidebar';
 import { usePlanDiff, type VersionInfo } from '@plannotator/ui/hooks/usePlanDiff';
 import { useLinkedDoc } from '@plannotator/ui/hooks/useLinkedDoc';
+import { useCodeFilePopout } from '@plannotator/ui/hooks/useCodeFilePopout';
 import { useAnnotationDraft } from '@plannotator/ui/hooks/useAnnotationDraft';
 import { useArchive } from '@plannotator/ui/hooks/useArchive';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
@@ -65,6 +66,7 @@ import { SidebarTabs } from '@plannotator/ui/components/sidebar/SidebarTabs';
 import { SidebarContainer } from '@plannotator/ui/components/sidebar/SidebarContainer';
 import type { ArchivedPlan } from '@plannotator/ui/components/sidebar/ArchiveBrowser';
 import { PlanDiffViewer } from '@plannotator/ui/components/plan-diff/PlanDiffViewer';
+import { CodeFilePopout } from '@plannotator/ui/components/CodeFilePopout';
 import type { PlanDiffMode } from '@plannotator/ui/components/plan-diff/PlanDiffModeSwitcher';
 // Demo content toggle. Default: the original Real-time Collaboration plan.
 // Opt-in diff-engine stress test: `VITE_DIFF_DEMO=1 bun run dev:hook` swaps
@@ -306,6 +308,18 @@ const App: React.FC = () => {
     markdown, annotations, selectedAnnotationId, globalAttachments,
     setMarkdown, setAnnotations, setSelectedAnnotationId, setGlobalAttachments,
     viewerRef, sidebar: linkedDocSidebar, sourceFilePath, sourceConverted,
+  });
+
+  // Code file popout (read-only syntax-highlighted overlay)
+  const codeFilePopout = useCodeFilePopout({
+    buildUrl: useCallback((codePath: string) => {
+      const baseDir = linkedDocHook.filepath
+        ? linkedDocHook.filepath.replace(/\/[^/]+$/, '')
+        : imageBaseDir;
+      return baseDir
+        ? `/api/doc?path=${encodeURIComponent(codePath)}&base=${encodeURIComponent(baseDir)}`
+        : `/api/doc?path=${encodeURIComponent(codePath)}`;
+    }, [linkedDocHook.filepath, imageBaseDir]),
   });
 
   // Archive browser
@@ -1843,6 +1857,7 @@ const App: React.FC = () => {
                   showDemoBadge={!isApiMode && !isLoadingShared && !isSharedSession}
                   maxWidth={annotateReaderMaxWidth}
                   onOpenLinkedDoc={handleOpenLinkedDoc}
+                  onOpenCodeFile={codeFilePopout.open}
                   linkedDocInfo={linkedDocHook.isActive ? { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label: fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath)?.isVault ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined, backLabel } : null}
                   imageBaseDir={imageBaseDir}
                   copyLabel={annotateSource === 'message' ? 'Copy message' : annotateSource === 'file' || annotateSource === 'folder' ? 'Copy file' : undefined}
@@ -1882,6 +1897,11 @@ const App: React.FC = () => {
           />
         </div>
         </ScrollViewportContext.Provider>
+
+        {/* Code File Popout */}
+        {codeFilePopout.popoutProps && (
+          <CodeFilePopout {...codeFilePopout.popoutProps} />
+        )}
 
         {/* Export Modal */}
         <ExportModal

@@ -11,11 +11,13 @@ import { buildFileTree, FILE_BROWSER_EXCLUDED } from "@plannotator/shared/refere
 import { detectObsidianVaults } from "./integrations";
 import {
 	isAbsoluteUserPath,
+	isCodeFilePath,
 	resolveMarkdownFile,
 	resolveUserPath,
 	isWithinProjectRoot,
 } from "@plannotator/shared/resolve-file";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
+import { preloadFile } from "@pierre/diffs/ssr";
 
 // --- Route handlers ---
 
@@ -67,6 +69,36 @@ export async function handleDoc(req: Request): Promise<Response> {
 				const html = await file.text();
 				const markdown = htmlToMarkdown(html);
 				return Response.json({ markdown, filepath: resolvedHtml, isConverted: true });
+			}
+		} catch { /* fall through */ }
+		return Response.json({ error: `File not found: ${requestedPath}` }, { status: 404 });
+	}
+
+	// Code files: resolve directly, return raw contents (no markdown conversion)
+	if (isCodeFilePath(requestedPath)) {
+		const resolvedCode = resolveUserPath(requestedPath, resolvedBase || projectRoot);
+		if (!resolvedBase && !isWithinProjectRoot(resolvedCode, projectRoot)) {
+			return Response.json({ error: "Access denied: path is outside project root" }, { status: 403 });
+		}
+		try {
+			const file = Bun.file(resolvedCode);
+			if (await file.exists()) {
+				if (file.size > 2 * 1024 * 1024) {
+					return Response.json({ error: "File too large (max 2MB)" }, { status: 413 });
+				}
+				const contents = await file.text();
+				const displayName = resolvedCode.split("/").pop() || resolvedCode;
+				let prerenderedHTML: string | undefined;
+				try {
+					const result = await preloadFile({
+						file: { name: displayName, contents },
+						options: { disableFileHeader: true },
+					});
+					prerenderedHTML = result.prerenderedHTML;
+				} catch {
+					// Fall back to client-side rendering
+				}
+				return Response.json({ codeFile: true, contents, filepath: resolvedCode, prerenderedHTML });
 			}
 		} catch { /* fall through */ }
 		return Response.json({ error: `File not found: ${requestedPath}` }, { status: 404 });
