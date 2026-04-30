@@ -15,6 +15,15 @@ export const COLLAB_CONFIG = {
 } as const;
 \`\`\`
 
+### Configuration reference
+
+| Parameter | Value | Description |
+| --- | --- | --- |
+| \`maxCollaborators\` | 50 | Hard ceiling per document before the gateway rejects new joins |
+| \`heartbeatIntervalMs\` | 5 000 ms | Ping cadence; three missed heartbeats trigger a reconnect |
+| \`operationBatchSize\` | 32 | Max ops coalesced into a single WebSocket frame |
+| \`gateway\` | \`wss://collab.plannotator.ai\` | Regional edge endpoint; clients are routed by latency |
+
 ## Overview
 Add real-time collaboration features to the editor using _**[WebSocket API](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)**_ and *[operational transforms](https://en.wikipedia.org/wiki/Operational_transformation)*.
 
