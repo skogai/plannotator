@@ -533,6 +533,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         const anchorLine = getLineNumberFromNode(selection.anchorNode);
         const focusLine = getLineNumberFromNode(selection.focusNode);
         if (anchorLine == null || focusLine == null) return;
+        if (anchorLine === focusLine) return;
         const side = getSideFromNode(selection.anchorNode);
         toolbar.handleLineSelectionEnd({
           start: Math.min(anchorLine, focusLine),

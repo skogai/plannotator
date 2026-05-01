@@ -241,13 +241,17 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
 
       if (e.key === 'v' && currentPath) {
         e.preventDefault();
+        const isCurrentlyViewed = viewedFiles.has(currentPath);
         onToggleViewed?.(currentPath);
-        collapseHistory.current.push(currentPath);
-        setCollapsedFiles(prev => {
-          const next = new Set(prev);
-          next.add(currentPath);
-          return next;
-        });
+        if (!isCurrentlyViewed) {
+          collapseHistory.current.push(currentPath);
+          setCollapsedFiles(prev => {
+            const next = new Set(prev);
+            next.add(currentPath);
+            return next;
+          });
+          setActiveFilePath(null);
+        }
         return;
       }
 
@@ -281,7 +285,7 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isActive, sortedFiles, collapsedFiles, activeFilePath, toggleCollapse, onToggleViewed, canStageFiles, onStage]);
+  }, [isActive, sortedFiles, collapsedFiles, activeFilePath, toggleCollapse, viewedFiles, onToggleViewed, canStageFiles, onStage]);
 
   // Click-and-drag line selection in diff content
   useEffect(() => {
@@ -294,6 +298,7 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
         const anchorLine = getLineNumberFromNode(selection.anchorNode);
         const focusLine = getLineNumberFromNode(selection.focusNode);
         if (anchorLine == null || focusLine == null) return;
+        if (anchorLine === focusLine) return;
         const side = getSideFromNode(selection.anchorNode);
         // Determine which file the selection is in by checking header positions
         const anchorRect = selection.getRangeAt(0).getBoundingClientRect();

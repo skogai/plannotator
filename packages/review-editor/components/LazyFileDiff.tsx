@@ -66,6 +66,7 @@ export const LazyFileDiff: React.FC<LazyFileDiffProps> = ({
   const [fileContents, setFileContents] = useState<{ old: string | null; new: string | null } | null>(null);
   useEffect(() => {
     if (!mounted) return;
+    setFileContents(null);
     const controller = new AbortController();
     const params = new URLSearchParams({ path: file.path });
     if (file.oldPath) params.set('oldPath', file.oldPath);

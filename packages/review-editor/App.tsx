@@ -695,12 +695,23 @@ const ReviewApp: React.FC = () => {
         e.preventDefault();
         handleCopyDiff();
       }
+      // Cmd/Ctrl+B to toggle file tree
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b' && !isTypingTarget(e.target)) {
+        e.preventDefault();
+        setIsFileTreeOpen(prev => !prev);
+      }
+      // Cmd/Ctrl+. to toggle sidebar
+      if ((e.metaKey || e.ctrlKey) && e.key === '.' && !isTypingTarget(e.target)) {
+        e.preventDefault();
+        if (reviewSidebar.isOpen) reviewSidebar.close();
+        else reviewSidebar.open();
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showExportModal, showDestinationMenu, isSearchOpen, searchQuery, searchMatches, isSearchPending, openSearch, stepSearchMatch, clearSearch, closeSearch, hasSearchableFiles]);
+  }, [showExportModal, showDestinationMenu, isSearchOpen, searchQuery, searchMatches, isSearchPending, openSearch, stepSearchMatch, clearSearch, closeSearch, hasSearchableFiles, reviewSidebar.isOpen, reviewSidebar.open, reviewSidebar.close, isFileTreeOpen]);
 
 
   // Load diff content - try API first, fall back to demo
@@ -1005,22 +1016,21 @@ const ReviewApp: React.FC = () => {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.shiftKey || isTypingTarget(e.target)) return;
-      const filePath = isAllFilesActive
-        ? allFilesVisibleFile
-        : files[activeFileIndex]?.path;
+      if (isAllFilesActive) return;
+      const filePath = files[activeFileIndex]?.path;
       if (!filePath) return;
 
-      if (e.key === 'v' && !isAllFilesActive) {
+      if (e.key === 'v') {
         e.preventDefault();
         handleToggleViewed(filePath);
-      } else if (e.key === 'a' && !isAllFilesActive && canStageFiles) {
+      } else if (e.key === 'a' && canStageFiles) {
         e.preventDefault();
         stageFile(filePath);
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [files, activeFileIndex, isAllFilesActive, allFilesVisibleFile, handleToggleViewed, canStageFiles, stageFile]);
+  }, [files, activeFileIndex, isAllFilesActive, handleToggleViewed, canStageFiles, stageFile]);
 
   // Shared function: apply a PR response (used by both initial load and PR switch)
   function applyPRResponse(data: PRSessionUpdate & {
@@ -1339,7 +1349,7 @@ const ReviewApp: React.FC = () => {
     handleAskAI, handleViewAIResponse, handleClickAIMarker,
     aiHistoryForSelection, agentJobs.jobs, prMetadata, prContext,
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
-    handleOpenTour,
+    handleOpenTour, isAllFilesActive, handleAddAnnotationForFile,
   ]);
 
   // Separate context for high-frequency job logs — prevents re-rendering all panels on every SSE event
@@ -1691,7 +1701,9 @@ const ReviewApp: React.FC = () => {
                 }`}
                 title={isFileTreeOpen ? 'Hide file tree' : 'Show file tree'}
               >
-                <FileTreeIcon className="w-4 h-4" />
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                </svg>
               </button>
             )}
             {prMetadata ? (
@@ -2008,6 +2020,10 @@ const ReviewApp: React.FC = () => {
             <ReviewHeaderMenu
               onOpenSettings={() => setOpenSettingsMenu(true)}
               onOpenExport={() => setShowExportModal(true)}
+              onToggleFileTree={() => setIsFileTreeOpen(prev => !prev)}
+              onToggleSidebar={() => reviewSidebar.isOpen ? reviewSidebar.close() : reviewSidebar.open()}
+              isFileTreeOpen={isFileTreeOpen}
+              isSidebarOpen={reviewSidebar.isOpen}
               appVersion={appVersion}
             />
           </div>
