@@ -136,6 +136,7 @@ const ReviewApp: React.FC = () => {
   const [annotations, setAnnotations] = useState<CodeAnnotation[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [isAllFilesActive, setIsAllFilesActive] = useState(false);
+  const [isDiffPanelActive, setIsDiffPanelActive] = useState(false);
   const [allFilesVisibleFile, setAllFilesVisibleFile] = useState<string | null>(null);
   const [pendingSelection, setPendingSelection] = useState<SelectedLineRange | null>(null);
   const [showExportModal, setShowExportModal] = useState(false);
@@ -529,8 +530,9 @@ const ReviewApp: React.FC = () => {
 
     // Sync activeFileIndex when user switches between dock tabs
     event.api.onDidActivePanelChange((panel) => {
-      if (!panel) { setIsAllFilesActive(false); return; }
+      if (!panel) { setIsAllFilesActive(false); setIsDiffPanelActive(false); return; }
       setIsAllFilesActive(panel.id === REVIEW_ALL_FILES_PANEL_ID);
+      setIsDiffPanelActive(isReviewDiffPanelId(panel.id));
       if (!isReviewDiffPanelId(panel.id)) return;
       const filePath = getReviewDiffPanelFilePath(panel.params);
       if (!filePath) return;
@@ -1015,7 +1017,7 @@ const ReviewApp: React.FC = () => {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.shiftKey || isTypingTarget(e.target)) return;
-      if (isAllFilesActive) return;
+      if (!isDiffPanelActive) return;
       const filePath = files[activeFileIndex]?.path;
       if (!filePath) return;
 
@@ -1029,7 +1031,7 @@ const ReviewApp: React.FC = () => {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [files, activeFileIndex, isAllFilesActive, handleToggleViewed, canStageFiles, stageFile]);
+  }, [files, activeFileIndex, isDiffPanelActive, handleToggleViewed, canStageFiles, stageFile]);
 
   // Shared function: apply a PR response (used by both initial load and PR switch)
   function applyPRResponse(data: PRSessionUpdate & {
@@ -1228,14 +1230,17 @@ const ReviewApp: React.FC = () => {
       return;
     }
 
-    // Find and switch to the file containing this annotation
-    const fileIndex = files.findIndex(f => f.path === annotation.filePath);
-    if (fileIndex !== -1) {
-      handleFileSwitch(fileIndex);
+    // In all-files mode, just set the selection — the panel's scroll-to-annotation
+    // effect handles expanding and scrolling. In single-file mode, switch to the file.
+    if (!isAllFilesActive) {
+      const fileIndex = files.findIndex(f => f.path === annotation.filePath);
+      if (fileIndex !== -1) {
+        handleFileSwitch(fileIndex);
+      }
     }
 
     setSelectedAnnotationId(id);
-  }, [allAnnotations, files, handleFileSwitch]);
+  }, [allAnnotations, files, isAllFilesActive, handleFileSwitch]);
 
   // Diff context bundled into local-mode feedback headers so the receiving
   // agent knows which diff the annotations are anchored to. Uses committedBase
