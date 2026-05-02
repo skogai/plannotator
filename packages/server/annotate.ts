@@ -14,6 +14,7 @@
 import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
+import type { LaunchMetadata } from "@plannotator/ai";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon } from "./shared-handlers";
 import { handleDoc, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc } from "./reference-handlers";
 import { contentHash, deleteDraft } from "./draft";
@@ -52,6 +53,13 @@ export interface AnnotateServerOptions {
   sourceInfo?: string;
   /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void;
+  /**
+   * Chat launch metadata — who invoked Plannotator and what session context
+   * they carry. The annotate server doesn't currently host AI chat endpoints,
+   * but accepting the option keeps the server-option surface consistent and
+   * lets future slices wire annotate-mode chat without changing the type.
+   */
+  launch?: LaunchMetadata;
 }
 
 export interface AnnotateServerResult {
@@ -133,6 +141,9 @@ export async function startAnnotateServer(
       server = Bun.serve({
         hostname: getServerHostname(),
         port: configuredPort,
+        // Disable Bun's default 10s idle timeout. External-annotations SSE
+        // needs longer-lived connections than the default allows.
+        idleTimeout: 0,
 
         async fetch(req, server) {
           const url = new URL(req.url);

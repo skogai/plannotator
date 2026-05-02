@@ -26,6 +26,68 @@ import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { urlToMarkdown } from "@plannotator/shared/url-to-markdown";
 import { statSync } from "fs";
 import path from "path";
+import type { LaunchMetadata } from "@plannotator/ai";
+
+// ---------------------------------------------------------------------------
+// OpenCode launch-metadata helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Walk up the OpenCode session tree to find the root user-facing session.
+ *
+ * `event.properties.sessionID` is the session that emitted the event. When
+ * the event originated from a Task-tool subagent, that id is a child
+ * session (parented by the user's visible session). Forking on the child
+ * id would fork the subagent — not what we want. We call `session.get`
+ * repeatedly, following `parentID`, until we hit a session with no parent.
+ *
+ * Failures (network, missing session, unexpected shape) fall through and
+ * return the most-recently-resolved id. The resolver then treats it as a
+ * normal fork_by_id; the downstream adapter either succeeds or fails its
+ * own fork call.
+ */
+async function resolveOpenCodeRootSession(
+  client: any,
+  sessionID: string,
+): Promise<string> {
+  let current = sessionID;
+  // Defensive cap: a session tree more than 16 levels deep is almost
+  // certainly a bug (or a cycle), and we shouldn't loop forever on it.
+  for (let i = 0; i < 16; i++) {
+    try {
+      const resp = await client.session.get({ path: { id: current } });
+      const parentID: string | undefined | null = resp?.data?.parentID;
+      if (!parentID) return current;
+      current = parentID;
+    } catch {
+      return current;
+    }
+  }
+  return current;
+}
+
+/**
+ * Build `LaunchMetadata` for an OpenCode command. Resolves the root session
+ * id synchronously-async (awaiting the walk) before returning. Returns
+ * `undefined` if the event carries no session id, which lets the resolver
+ * fall back to `fresh`.
+ */
+async function opencodeLaunchMetadata(
+  event: any,
+  client: any,
+  cwd: string,
+): Promise<LaunchMetadata | undefined> {
+  // @ts-ignore - Event properties contain sessionID
+  const rawID: string | undefined = event.properties?.sessionID;
+  if (!rawID) return undefined;
+  const rootID = await resolveOpenCodeRootSession(client, rawID);
+  return {
+    harness: "opencode",
+    invocation: "event",
+    cwd,
+    sessionId: rootID,
+  };
+}
 
 /** Shared dependencies injected by the plugin */
 export interface CommandDeps {
@@ -91,6 +153,8 @@ export async function handleReviewCommand(
     diffError = diffResult.error;
   }
 
+  const launch = await opencodeLaunchMetadata(event, client, directory ?? process.cwd());
+
   const server = await startReviewServer({
     rawPatch,
     gitRef,
@@ -103,6 +167,7 @@ export async function handleReviewCommand(
     shareBaseUrl: getShareBaseUrl(),
     htmlContent: reviewHtmlContent,
     opencodeClient: client,
+    launch,
     onReady: handleReviewServerReady,
   });
 
@@ -115,8 +180,13 @@ export async function handleReviewCommand(
   }
 
   if (result.feedback) {
+    // Feedback must go back to the session that emitted the command event,
+    // not the parent-walked root used for chat context. If a subagent
+    // triggered `/plannotator-review`, it's the subagent that's waiting
+    // for the response; injecting into the root would hide feedback from
+    // the caller and surface it in the user's main TUI instead.
     // @ts-ignore - Event properties contain sessionID
-    const sessionId = event.properties?.sessionID;
+    const sessionId: string | undefined = event.properties?.sessionID;
 
     if (sessionId) {
       const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== "disabled";
@@ -147,7 +217,7 @@ export async function handleAnnotateCommand(
   event: any,
   deps: CommandDeps
 ) {
-  const { client, htmlContent, getSharingEnabled, getShareBaseUrl } = deps;
+  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, directory } = deps;
 
   // @ts-ignore - Event properties contain arguments
   const filePath = event.properties?.arguments || event.arguments || "";
@@ -221,6 +291,12 @@ export async function handleAnnotateCommand(
     }
   }
 
+  // Use OpenCode's working directory for diagnostic cwd, not the annotation
+  // target's parent — the resolver ignores cwd for OpenCode (it produces
+  // fork_by_id from sessionID), but keeping cwd consistent across handlers
+  // makes the context badge / debug logs predictable.
+  const launch = await opencodeLaunchMetadata(event, client, directory ?? process.cwd());
+
   const server = await startAnnotateServer({
     markdown,
     filePath: absolutePath,
@@ -229,6 +305,7 @@ export async function handleAnnotateCommand(
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
     htmlContent,
+    launch,
     onReady: handleAnnotateServerReady,
   });
 
@@ -241,8 +318,11 @@ export async function handleAnnotateCommand(
   }
 
   if (result.feedback) {
+    // Feedback → originating session (may be subagent). See review handler
+    // for rationale. `launch.sessionId` is the parent-walked root, intended
+    // for chat context only.
     // @ts-ignore - Event properties contain sessionID
-    const sessionId = event.properties?.sessionID;
+    const sessionId: string | undefined = event.properties?.sessionID;
 
     if (sessionId) {
       try {
@@ -271,7 +351,7 @@ export async function handleAnnotateLastCommand(
   event: any,
   deps: CommandDeps
 ): Promise<string | null> {
-  const { client, htmlContent, getSharingEnabled, getShareBaseUrl } = deps;
+  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, directory } = deps;
 
   // @ts-ignore - Event properties contain sessionID
   const sessionId = event.properties?.sessionID;
@@ -310,6 +390,8 @@ export async function handleAnnotateLastCommand(
 
   client.app.log({ level: "info", message: "Opening annotation UI for last message..." });
 
+  const launch = await opencodeLaunchMetadata(event, client, directory ?? process.cwd());
+
   const server = await startAnnotateServer({
     markdown: lastText,
     filePath: "last-message",
@@ -318,6 +400,7 @@ export async function handleAnnotateLastCommand(
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
     htmlContent,
+    launch,
     onReady: handleAnnotateServerReady,
   });
 
@@ -336,9 +419,11 @@ export async function handleArchiveCommand(
   event: any,
   deps: CommandDeps
 ) {
-  const { client, htmlContent, getSharingEnabled, getShareBaseUrl } = deps;
+  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, directory } = deps;
 
   client.app.log({ level: "info", message: "Opening plan archive..." });
+
+  const launch = await opencodeLaunchMetadata(event, client, directory ?? process.cwd());
 
   const server = await startPlannotatorServer({
     plan: "",
@@ -347,6 +432,7 @@ export async function handleArchiveCommand(
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
     htmlContent,
+    launch,
     onReady: handleServerReady,
   });
 

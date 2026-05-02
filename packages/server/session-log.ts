@@ -376,3 +376,31 @@ export function getLastRenderedMessage(
     return null;
   }
 }
+
+/**
+ * Resolve a Claude Code session ID for the given cwd, running the full
+ * 3-strategy cascade that `annotate-last` already uses:
+ *
+ *   1. PPID metadata (most reliable when invoked as a child of Claude Code).
+ *   2. cwd-slug match with Windows case-insensitive fallback.
+ *   3. Ancestor directory walk (for when the user `cd`'d into a subdirectory).
+ *
+ * Returns the session ID parsed from the matching filename, or null if no
+ * Claude session is reachable. Session IDs live in
+ * `~/.claude/projects/<slug>/<session-id>.jsonl`.
+ *
+ * Used by the chat-context resolver's `fork_by_heuristic` execution path.
+ * The resolver picks the strategy synchronously; this function runs the
+ * filesystem lookup that promotes the strategy into a concrete `fork_by_id`
+ * at session-creation time.
+ */
+export function resolveClaudeSessionIdByCwd(cwd: string): string | null {
+  const match =
+    resolveSessionLogByPpid() ??
+    findSessionLogsForCwd(cwd)[0] ??
+    findSessionLogsByAncestorWalk(cwd)[0] ??
+    null;
+  if (!match) return null;
+  const base = match.split(/[\\/]/).pop() ?? "";
+  return base.endsWith(".jsonl") ? base.slice(0, -".jsonl".length) : null;
+}

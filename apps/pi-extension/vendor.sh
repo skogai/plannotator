@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 
 mkdir -p generated generated/ai/providers
 
-for f in feedback-templates review-core storage draft project pr-provider pr-github pr-gitlab checklist integrations-common repo reference-common favicon resolve-file config external-annotation agent-jobs worktree html-to-markdown url-to-markdown; do
+for f in feedback-templates review-core storage draft project pr-provider pr-github pr-gitlab checklist integrations-common repo reference-common favicon resolve-file config external-annotation agent-jobs worktree html-to-markdown url-to-markdown chat-transcript chat-context ai-messages claude-models; do
   src="../../packages/shared/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/shared/%s.ts\n' "$f" | cat - "$src" > "generated/$f.ts"
 done
@@ -21,12 +21,19 @@ for f in codex-review claude-review path-utils; do
     > "generated/$f.ts"
 done
 
-for f in index types provider session-manager endpoints context base-session; do
+# AI files: rewrite `@plannotator/shared/X` imports to relative `../X.js`
+# so the vendored tree is self-contained (no runtime workspace deps).
+for f in index types provider session-manager endpoints context base-session resolve-context; do
   src="../../packages/ai/$f.ts"
-  printf '// @generated — DO NOT EDIT. Source: packages/ai/%s.ts\n' "$f" | cat - "$src" > "generated/ai/$f.ts"
+  printf '// @generated — DO NOT EDIT. Source: packages/ai/%s.ts\n' "$f" | cat - "$src" \
+    | sed 's|from "@plannotator/shared/\([^"]*\)"|from "../\1.js"|g' \
+    > "generated/ai/$f.ts"
 done
 
+# Provider files live one level deeper, so shared rewrites reach ../../X.js.
 for f in claude-agent-sdk codex-sdk opencode-sdk pi-sdk pi-sdk-node pi-events; do
   src="../../packages/ai/providers/$f.ts"
-  printf '// @generated — DO NOT EDIT. Source: packages/ai/providers/%s.ts\n' "$f" | cat - "$src" > "generated/ai/providers/$f.ts"
+  printf '// @generated — DO NOT EDIT. Source: packages/ai/providers/%s.ts\n' "$f" | cat - "$src" \
+    | sed 's|from "@plannotator/shared/\([^"]*\)"|from "../../\1.js"|g' \
+    > "generated/ai/providers/$f.ts"
 done

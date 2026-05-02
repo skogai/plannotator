@@ -34,7 +34,9 @@ import {
 } from "./claude-review";
 import { saveConfig, detectGitUser, getServerConfig } from "./config";
 import { type PRMetadata, type PRReviewFileComment, fetchPRFileContent, fetchPRContext, submitPRReview, fetchPRViewedFiles, markPRFilesViewed, getPRUser, prRefFromMetadata, getDisplayRepo, getMRLabel, getMRNumberLabel } from "./pr";
-import { createAIEndpoints, ProviderRegistry, SessionManager, createProvider, type AIEndpoints, type PiSDKConfig } from "@plannotator/ai";
+import { createAIEndpoints, ProviderRegistry, SessionManager, createProvider, type AIEndpoints, type PiSDKConfig, type LaunchMetadata, type ClaudeAgentSDKConfig } from "@plannotator/ai";
+import { resolveClaudeSessionIdByCwd, findSessionLogsForCwd } from "./session-log";
+import { startHeartbeat } from "./sse-utils";
 import { isWSL } from "./browser";
 
 // Re-export utilities
@@ -75,6 +77,12 @@ export interface ReviewServerOptions {
   agentCwd?: string;
   /** Cleanup callback invoked when server stops (e.g., remove temp worktree) */
   onCleanup?: () => void | Promise<void>;
+  /**
+   * Chat launch metadata — who invoked Plannotator and what session context
+   * they carry. Threaded into the AI endpoint factory so `resolveChatContext`
+   * can pick a fork/resume/fresh strategy. See `packages/ai/resolve-context.ts`.
+   */
+  launch?: LaunchMetadata;
 }
 
 export interface ReviewServerResult {
@@ -221,11 +229,13 @@ export async function startReviewServer(
   try {
     await import("@plannotator/ai/providers/claude-agent-sdk");
     const claudePath = Bun.which("claude");
-    const provider = await createProvider({
+    const claudeConfig: ClaudeAgentSDKConfig = {
       type: "claude-agent-sdk",
       cwd: process.cwd(),
       ...(claudePath && { claudeExecutablePath: claudePath }),
-    });
+      findSessionLogsForCwd,
+    };
+    const provider = await createProvider(claudeConfig);
     aiRegistry.register(provider);
   } catch {
     // Claude SDK not available
@@ -293,6 +303,16 @@ export async function startReviewServer(
         if (options.agentCwd) return options.agentCwd;
         return resolveVcsCwd(currentDiffType, gitContext?.cwd) ?? process.cwd();
       },
+      getLaunch: () => options.launch,
+      // Heuristic fork (scan ~/.claude/projects/ by cwd) is disabled by
+      // default. Forking from a large parent session has a ~30-60s first-
+      // turn prompt-cache-miss cost that's poor UX when the user didn't
+      // explicitly ask for it. Claude Code hooks with a real `session_id`
+      // in stdin still land on `fork_by_id` and fork deliberately — that
+      // path is preserved. A future UI can surface "fork from recent
+      // session X" as an opt-in action and re-wire this callback behind it.
+      // resolveHeuristicSession: resolveClaudeSessionIdByCwd,
+      startHeartbeat,
     });
   }
 
@@ -350,6 +370,13 @@ export async function startReviewServer(
       server = Bun.serve({
         hostname: getServerHostname(),
         port: configuredPort,
+        // Disable Bun's default 10s idle timeout. AI streams (chat, review
+        // jobs, external annotations) can sit idle for tens of seconds
+        // while a forked SDK subprocess loads a large session file, and the
+        // 30s heartbeat on the session-stream isn't frequent enough to beat
+        // the 10s floor. 0 = no idle timeout — the client's abort signal
+        // and the stream's `cancel` hook handle cleanup instead.
+        idleTimeout: 0,
 
         async fetch(req, server) {
           const url = new URL(req.url);
@@ -656,10 +683,16 @@ export async function startReviewServer(
             }
           }
 
-          // AI endpoints
+          // AI endpoints — static paths dispatched via path-map, parameterized
+          // paths (e.g. /api/ai/session/:id/stream) via handleDynamic.
           if (aiEndpoints && url.pathname.startsWith("/api/ai/")) {
-            const handler = aiEndpoints[url.pathname as keyof AIEndpoints];
-            if (handler) return handler(req);
+            const staticHandler =
+              aiEndpoints[url.pathname as keyof typeof aiEndpoints];
+            if (typeof staticHandler === "function") {
+              return (staticHandler as (req: Request) => Promise<Response>)(req);
+            }
+            const dynamic = await aiEndpoints.handleDynamic(req, url);
+            if (dynamic) return dynamic;
             return Response.json({ error: "Not found" }, { status: 404 });
           }
 

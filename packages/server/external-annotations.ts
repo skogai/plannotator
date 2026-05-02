@@ -14,12 +14,11 @@ import {
   transformPlanInput,
   transformReviewInput,
   serializeSSEEvent,
-  HEARTBEAT_COMMENT,
-  HEARTBEAT_INTERVAL_MS,
   type AnnotationStore,
   type StorableAnnotation,
   type ExternalAnnotationEvent,
 } from "@plannotator/shared/external-annotation";
+import { startHeartbeat } from "./sse-utils";
 
 export type { ExternalAnnotationEvent } from "@plannotator/shared/external-annotation";
 
@@ -86,10 +85,10 @@ export function createExternalAnnotationHandler(
       if (url.pathname === STREAM && req.method === "GET") {
         options?.disableIdleTimeout?.();
 
-        let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-        let ctrl: ReadableStreamDefaultController;
+        let stopHeartbeat: (() => void) | null = null;
+        let ctrl: ReadableStreamDefaultController<Uint8Array>;
 
-        const stream = new ReadableStream({
+        const stream = new ReadableStream<Uint8Array>({
           start(controller) {
             ctrl = controller;
 
@@ -102,19 +101,16 @@ export function createExternalAnnotationHandler(
 
             subscribers.add(controller);
 
-            // Heartbeat to keep connection alive
-            heartbeatTimer = setInterval(() => {
-              try {
-                controller.enqueue(encoder.encode(HEARTBEAT_COMMENT));
-              } catch {
-                // Stream closed
-                if (heartbeatTimer) clearInterval(heartbeatTimer);
-                subscribers.delete(controller);
-              }
-            }, HEARTBEAT_INTERVAL_MS);
+            // Heartbeat shared with the other long-lived SSE streams via
+            // packages/server/sse-utils — 30s `: ping\n\n` comments. The
+            // onFailure drops the dead controller from the subscriber set
+            // when enqueue fails without a preceding cancel.
+            stopHeartbeat = startHeartbeat(controller, {
+              onFailure: () => subscribers.delete(controller),
+            });
           },
           cancel() {
-            if (heartbeatTimer) clearInterval(heartbeatTimer);
+            stopHeartbeat?.();
             subscribers.delete(ctrl);
           },
         });

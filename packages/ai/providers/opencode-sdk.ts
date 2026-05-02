@@ -16,6 +16,7 @@ import type {
 	AIProviderCapabilities,
 	AISession,
 	CreateSessionOptions,
+	ForkCandidate,
 	OpenCodeConfig,
 } from "../types.ts";
 
@@ -195,6 +196,42 @@ export class OpenCodeProvider implements AIProvider {
 			model: undefined,
 			parentSessionId: null,
 		});
+	}
+
+	async listForkCandidates(cwd: string, limit = 5): Promise<ForkCandidate[]> {
+		// Ensure the OpenCode server/client is up before enumerating sessions.
+		// Without this, the first Context-menu open (which happens before any
+		// chat message, so `ensureServer` hasn't been called yet) returns an
+		// empty list — even when prior sessions exist on disk. The picker
+		// would mislead the user into thinking there's nothing to inherit.
+		try {
+			await this.ensureServer();
+		} catch {
+			return [];
+		}
+		const client = this.client;
+		if (!client) return [];
+		try {
+			const res = await client.session.list({
+				query: { directory: cwd },
+			});
+			const sessions = (res.data ?? []) as Array<{
+				id: string;
+				title?: string;
+				directory?: string;
+				time?: { updated?: number; created?: number };
+			}>;
+			return sessions.slice(0, limit).map((s) => ({
+				id: s.id,
+				label: s.title?.trim() || "OpenCode session",
+				lastActiveAt: s.time?.updated ?? s.time?.created ?? Date.now(),
+				preview: s.title?.trim(),
+				parentFields: { sessionId: s.id, cwd: s.directory ?? cwd },
+				inheritance: "fork" as const,
+			}));
+		} catch {
+			return [];
+		}
 	}
 
 	dispose(): void {
@@ -385,12 +422,14 @@ function isTerminalEvent(eventType: string): boolean {
  * Map an OpenCode SSE event to AIMessage[].
  *
  * Key events:
- *   message.part.delta  → text_delta (streaming text)
- *   message.part.updated → tool_use / tool_result (tool lifecycle)
+ *   message.part.delta   → text_delta (streaming text)
+ *   message.part.updated → text (final snapshot) / tool_use / tool_result
  *   permission.updated   → permission_request
  *   session.status        → result (when idle)
  *   message.updated       → error (when message has error)
  */
+const DEV = typeof process !== "undefined" && process.env?.NODE_ENV === "development";
+
 export function mapOpenCodeEvent(
 	eventType: string,
 	props: Record<string, unknown>,
@@ -411,6 +450,14 @@ export function mapOpenCodeEvent(
 			if (!part) return [];
 
 			const partType = part.type as string;
+
+			if (partType === "text") {
+				const text = part.text as string;
+				if (text) {
+					return [{ type: "text", text }];
+				}
+				return [];
+			}
 
 			if (partType === "tool") {
 				const state = part.state as Record<string, unknown>;
@@ -530,6 +577,7 @@ export function mapOpenCodeEvent(
 		}
 
 		default:
+			if (DEV) console.warn("[opencode-sdk] unhandled event:", eventType, props);
 			return [];
 	}
 }

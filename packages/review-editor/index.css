@@ -994,6 +994,25 @@ diffs-container {
   min-height: 0;
 }
 
+/* Wider variant for the Context picker — fork candidate rows include a
+   preview line that needs more horizontal breathing room. Right-aligned
+   so it stays close to the button that opened it. */
+.ai-config-menu-context {
+  min-width: 260px;
+  right: 0;
+  left: auto;
+}
+
+.ai-config-menu-section-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  padding: 6px 8px 3px;
+  opacity: 0.6;
+}
+
 .ai-config-menu-search {
   padding: 4px;
   margin-bottom: 2px;

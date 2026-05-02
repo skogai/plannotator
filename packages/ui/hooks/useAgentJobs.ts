@@ -75,6 +75,18 @@ export function useAgentJobs(
           case 'snapshot':
             receivedSnapshotRef.current = true;
             setJobs(parsed.jobs);
+            // Seed jobLogs from each job's accumulated `output` so a
+            // reconnecting client sees the full history rather than an
+            // empty log panel. Jobs that haven't produced output yet
+            // simply don't get a map entry — the existing append logic
+            // on the `job:log` branch initializes it lazily.
+            setJobLogs((prev) => {
+              const next = new Map(prev);
+              for (const job of parsed.jobs) {
+                if (job.output !== undefined) next.set(job.id, job.output);
+              }
+              return next;
+            });
             break;
           case 'job:started':
             setJobs((prev) => [...prev, parsed.job]);
@@ -139,6 +151,16 @@ export function useAgentJobs(
         const data = await res.json();
         if (Array.isArray(data.jobs)) {
           setJobs(data.jobs);
+          // Seed jobLogs from each job's accumulated `output` on the
+          // polling path too so the log panel is populated after a refresh
+          // when SSE isn't available. Mirrors the snapshot handler above.
+          setJobLogs((prev) => {
+            const next = new Map(prev);
+            for (const job of data.jobs as AgentJobInfo[]) {
+              if (job.output !== undefined) next.set(job.id, job.output);
+            }
+            return next;
+          });
         }
         if (typeof data.version === 'number') {
           versionRef.current = data.version;

@@ -13,6 +13,7 @@
 
 import { buildSystemPrompt, buildForkPreamble, buildEffectivePrompt } from "../context.ts";
 import { BaseSession } from "../base-session.ts";
+import { isAdaptiveThinkingDefault } from "@plannotator/shared/claude-models";
 import type {
   AIProvider,
   AIProviderCapabilities,
@@ -20,6 +21,7 @@ import type {
   AIMessage,
   CreateSessionOptions,
   ClaudeAgentSDKConfig,
+  ForkCandidate,
 } from "../types.ts";
 
 // ---------------------------------------------------------------------------
@@ -54,6 +56,36 @@ interface ClaudeSDKQueryOptions {
   allowDangerouslySkipPermissions?: boolean;
   pathToClaudeCodeExecutable?: string;
   settingSources?: string[];
+  effort?: "low" | "medium" | "high" | "max";
+  thinking?:
+    | { type: "adaptive" }
+    | { type: "enabled"; budgetTokens: number }
+    | { type: "disabled" };
+}
+
+/**
+ * Coerce the cross-provider effort enum to Claude's SDK vocabulary.
+ *   - `minimal`/`low` → `low`
+ *   - `medium` → `medium`
+ *   - `high` → `high`
+ *   - `xhigh` → `max` (Opus 4.6+ only; SDK ignores unsupported)
+ */
+function coerceEffortForClaude(
+  effort: CreateSessionOptions["reasoningEffort"],
+): ClaudeSDKQueryOptions["effort"] | undefined {
+  switch (effort) {
+    case "minimal":
+    case "low":
+      return "low";
+    case "medium":
+      return "medium";
+    case "high":
+      return "high";
+    case "xhigh":
+      return "max";
+    default:
+      return undefined;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -92,9 +124,9 @@ export class ClaudeAgentSDKProvider implements AIProvider {
 
   async forkSession(options: CreateSessionOptions): Promise<AISession> {
     const parent = options.context.parent;
-    if (!parent) {
+    if (!parent?.sessionId) {
       throw new Error(
-        "Cannot fork: no parent session provided in context. " +
+        "Cannot fork: no parent session id provided in context. " +
           "Use createSession() for standalone sessions."
       );
     }
@@ -103,7 +135,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
       ...this.baseConfig(options),
       systemPrompt: null,
       forkPreamble: buildForkPreamble(options.context),
-      cwd: parent.cwd,
+      cwd: parent.cwd ?? options.cwd ?? this.config.cwd ?? process.cwd(),
       parentSessionId: parent.sessionId,
       forkFromSession: parent.sessionId,
     });
@@ -120,6 +152,47 @@ export class ClaudeAgentSDKProvider implements AIProvider {
     });
   }
 
+  async listForkCandidates(cwd: string, limit = 5): Promise<ForkCandidate[]> {
+    const find = this.config.findSessionLogsForCwd;
+    if (!find) return [];
+    let paths: string[];
+    try {
+      paths = find(cwd);
+    } catch {
+      return [];
+    }
+    // Lazy-import node:fs so this module stays importable from bundled
+    // browser-like contexts (tests, Pi runtime host) that never call this.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require("node:fs") as typeof import("node:fs");
+    const candidates: ForkCandidate[] = [];
+    for (const p of paths.slice(0, limit)) {
+      const id = fileBasenameNoExt(p);
+      let lastActiveAt = Date.now();
+      let sizeBytes: number | undefined;
+      try {
+        const st = fs.statSync(p);
+        lastActiveAt = st.mtimeMs;
+        sizeBytes = st.size;
+      } catch {
+        /* fall through with best-effort defaults */
+      }
+      const { firstLine, lastLine } = readFirstAndLastLine(fs, p);
+      const { model, preview } = extractClaudeSessionMeta(firstLine, lastLine);
+      candidates.push({
+        id,
+        label: model ?? "Claude session",
+        lastActiveAt,
+        model,
+        tokenEstimate: sizeBytes !== undefined ? Math.round(sizeBytes / 4) : undefined,
+        preview,
+        parentFields: { sessionId: id, cwd },
+        inheritance: "fork",
+      });
+    }
+    return candidates;
+  }
+
   dispose(): void {
     // No persistent resources to clean up
   }
@@ -133,6 +206,8 @@ export class ClaudeAgentSDKProvider implements AIProvider {
       permissionMode: this.config.permissionMode ?? "default",
       claudeExecutablePath: this.config.claudeExecutablePath,
       settingSources: this.config.settingSources ?? ['user', 'project'],
+      effort: coerceEffortForClaude(options?.reasoningEffort),
+      thinking: options?.thinking,
     };
   }
 }
@@ -170,6 +245,8 @@ interface SessionConfig {
   resumeSessionId?: string;
   claudeExecutablePath?: string;
   settingSources?: string[];
+  effort?: ClaudeSDKQueryOptions["effort"];
+  thinking?: ClaudeSDKQueryOptions["thinking"];
 }
 
 class ClaudeAgentSDKSession extends BaseSession {
@@ -199,7 +276,6 @@ class ClaudeAgentSDKSession extends BaseSession {
         this._firstQuerySent,
       );
       const options = this.buildQueryOptions();
-
       const stream = queryFn({ prompt: queryPrompt, options }) as
         AsyncIterable<Record<string, unknown>> & { streamInput: (iter: AsyncIterable<unknown>) => Promise<void> };
       this._activeQuery = stream;
@@ -256,6 +332,21 @@ class ClaudeAgentSDKSession extends BaseSession {
   // Internal
   // -------------------------------------------------------------------------
 
+  // ---------------------------------------------------------------------------
+  // Prompt caching note (Slice 1 PR 1, Step 5):
+  //
+  // The Claude Agent SDK handles Anthropic prompt caching internally when the
+  // "claude_code" preset is used (it injects `cache_control: { type: "ephemeral" }`
+  // on appropriate content blocks as part of its conversation management —
+  // see the SDK's bundled CLI). We don't pass cache_control here and we
+  // shouldn't: the SDK owns the breakpoint placement, and the conversation is
+  // stable (we resume the same session id across turns), which lets cache
+  // reads happen on every turn after the first.
+  //
+  // Verify in acceptance testing via the response `usage` fields:
+  // `cache_creation_input_tokens > 0` on the first turn, then
+  // `cache_read_input_tokens > 0` on subsequent turns within the 5-min TTL.
+  // ---------------------------------------------------------------------------
   private buildQueryOptions(): ClaudeSDKQueryOptions {
     const opts: ClaudeSDKQueryOptions = {
       model: this.config.model,
@@ -275,6 +366,23 @@ class ClaudeAgentSDKSession extends BaseSession {
 
     if (this.config.maxBudgetUsd) {
       opts.maxBudgetUsd = this.config.maxBudgetUsd;
+    }
+
+    // Effort and thinking — placed before the resume early-return so they
+    // apply on every turn (including resumed ones). Config itself is frozen
+    // at session construction; picker changes in the UI trigger
+    // resetSession(), which creates a new session with the new config.
+    if (this.config.effort) {
+      opts.effort = this.config.effort;
+    }
+    // Thinking: user-supplied wins; otherwise apply the adaptive default
+    // for models that support it (Opus 4.7+). Callers can force thinking
+    // on older models explicitly; leaving it undefined on pre-4.7 keeps
+    // the SDK's own default behavior.
+    if (this.config.thinking) {
+      opts.thinking = this.config.thinking;
+    } else if (isAdaptiveThinkingDefault(this.config.model)) {
+      opts.thinking = { type: "adaptive" };
     }
 
     // After the first query resolves a real session ID, all subsequent
@@ -341,6 +449,12 @@ function mapSDKMessage(msg: Record<string, unknown>): AIMessage[] {
       const textParts: string[] = [];
 
       for (const block of content) {
+        // Thinking blocks are intentionally skipped here. In the normal
+        // streaming path they've already arrived via content_block_delta
+        // events; emitting them again would double the thinking text in
+        // the accumulator. In the non-streaming fallback (stream failure,
+        // watchdog abort) thinking is lost, but the answer text still
+        // arrives — acceptable degradation for a transparency feature.
         if (block.type === "text" && typeof block.text === "string") {
           textParts.push(block.text);
         } else if (block.type === "tool_use") {
@@ -375,6 +489,9 @@ function mapSDKMessage(msg: Record<string, unknown>): AIMessage[] {
         const delta = event.delta as Record<string, unknown>;
         if (delta?.type === "text_delta" && typeof delta.text === "string") {
           return [{ type: "text_delta", delta: delta.text }];
+        }
+        if (delta?.type === "thinking_delta" && typeof delta.thinking === "string") {
+          return [{ type: "thinking_delta", delta: delta.thinking }];
         }
       }
       return [{ type: "unknown", raw: msg }];
@@ -426,6 +543,111 @@ function mapSDKMessage(msg: Record<string, unknown>): AIMessage[] {
     default:
       return [{ type: "unknown", raw: msg }];
   }
+}
+
+// ---------------------------------------------------------------------------
+// ForkCandidate helpers
+// ---------------------------------------------------------------------------
+
+function fileBasenameNoExt(path: string): string {
+  const base = path.split(/[\\/]/).pop() ?? "";
+  return base.endsWith(".jsonl") ? base.slice(0, -".jsonl".length) : base;
+}
+
+/**
+ * Read the first and last non-empty lines of a JSONL file without loading
+ * the whole thing — the file can be megabytes. First line is small (header
+ * is near the top); last line requires a seek-from-end tail read.
+ */
+function readFirstAndLastLine(
+  fs: typeof import("node:fs"),
+  path: string,
+): { firstLine: string | null; lastLine: string | null } {
+  let firstLine: string | null = null;
+  let lastLine: string | null = null;
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(path, "r");
+    const st = fs.fstatSync(fd);
+    if (st.size === 0) return { firstLine, lastLine };
+
+    // First line: read up to 16KB from the start, take up to the first newline.
+    const headLen = Math.min(16 * 1024, st.size);
+    const head = Buffer.alloc(headLen);
+    fs.readSync(fd, head, 0, headLen, 0);
+    const headStr = head.toString("utf8");
+    const nl = headStr.indexOf("\n");
+    firstLine = nl >= 0 ? headStr.slice(0, nl) : headStr;
+
+    // Last line: read up to 16KB from the end, take the last non-empty segment.
+    const tailLen = Math.min(16 * 1024, st.size);
+    const tail = Buffer.alloc(tailLen);
+    fs.readSync(fd, tail, 0, tailLen, st.size - tailLen);
+    const tailStr = tail.toString("utf8");
+    const lines = tailStr.split("\n").filter((l) => l.trim().length > 0);
+    lastLine = lines.length > 0 ? lines[lines.length - 1]! : null;
+  } catch {
+    /* best-effort */
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* ignore */ }
+    }
+  }
+  return { firstLine, lastLine };
+}
+
+/**
+ * Extract display metadata from a Claude session JSONL. The header turn
+ * carries `model` and other session-level fields; the final turn gives us
+ * a preview of the last assistant response.
+ */
+function extractClaudeSessionMeta(
+  firstLine: string | null,
+  lastLine: string | null,
+): { model?: string; preview?: string } {
+  let model: string | undefined;
+  if (firstLine) {
+    try {
+      const parsed = JSON.parse(firstLine) as Record<string, unknown>;
+      // Claude Code session JSONL varies across versions — probe the usual
+      // fields without being picky about where model lives.
+      const m = (parsed.model as string | undefined)
+        ?? ((parsed.message as { model?: string } | undefined)?.model);
+      if (typeof m === "string") model = m;
+    } catch {
+      /* malformed — no model */
+    }
+  }
+  let preview: string | undefined;
+  if (lastLine) {
+    try {
+      const parsed = JSON.parse(lastLine) as Record<string, unknown>;
+      const msg = parsed.message as { content?: unknown } | undefined;
+      const content = msg?.content;
+      if (typeof content === "string") {
+        preview = truncatePreview(content);
+      } else if (Array.isArray(content)) {
+        for (const block of content) {
+          if (
+            block && typeof block === "object"
+            && (block as { type?: string }).type === "text"
+            && typeof (block as { text?: string }).text === "string"
+          ) {
+            preview = truncatePreview((block as { text: string }).text);
+            break;
+          }
+        }
+      }
+    } catch {
+      /* malformed — no preview */
+    }
+  }
+  return { model, preview };
+}
+
+function truncatePreview(s: string): string {
+  const flat = s.replace(/\s+/g, " ").trim();
+  return flat.length > 120 ? flat.slice(0, 117) + "…" : flat;
 }
 
 // ---------------------------------------------------------------------------

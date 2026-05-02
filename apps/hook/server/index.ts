@@ -55,6 +55,7 @@ import {
   startPlannotatorServer,
   handleServerReady,
 } from "@plannotator/server";
+import type { LaunchMetadata, Harness, Invocation } from "@plannotator/ai";
 import {
   startReviewServer,
   handleReviewServerReady,
@@ -81,7 +82,7 @@ import { hostnameOrFallback } from "@plannotator/shared/project";
 import { planDenyFeedback } from "@plannotator/shared/feedback-templates";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import type { Origin } from "@plannotator/shared/agents";
-import { findSessionLogsForCwd, resolveSessionLogByPpid, findSessionLogsByAncestorWalk, getLastRenderedMessage, type RenderedMessage } from "./session-log";
+import { findSessionLogsForCwd, resolveSessionLogByPpid, findSessionLogsByAncestorWalk, getLastRenderedMessage, type RenderedMessage } from "@plannotator/server/session-log";
 import { findCodexRolloutByThreadId, getLastCodexMessage } from "./codex-session";
 import { findCopilotPlanContent, findCopilotSessionForCwd, getLastCopilotMessage } from "./copilot-session";
 import {
@@ -145,6 +146,91 @@ const detectedOrigin: Origin =
   process.env.CODEX_THREAD_ID ? "codex" :
   process.env.COPILOT_CLI ? "copilot-cli" :
   "claude-code";
+
+// ---------------------------------------------------------------------------
+// Launch metadata synthesis
+// ---------------------------------------------------------------------------
+//
+// Every server-start call in this binary (plan review, code review, annotate,
+// archive, etc.) passes a `LaunchMetadata` so the AI chat layer can pick a
+// fork/resume/fresh strategy via `resolveChatContext`. The helpers below
+// centralize the logic so every entry point agrees on how to derive the
+// metadata from the current Origin + available environment and event data.
+
+/**
+ * Map our `Origin` enum (used for UI badges) to the `Harness` enum used by
+ * the chat context resolver. Origins outside the resolver's scope
+ * (copilot-cli, gemini-cli) collapse to `standalone` — those launches don't
+ * carry a session id the resolver can fork from, so the chat will be `fresh`.
+ */
+function harnessFromOrigin(origin: Origin): Harness {
+  switch (origin) {
+    case "claude-code":
+      return "claude-code";
+    case "opencode":
+      return "opencode";
+    case "codex":
+      return "codex";
+    case "pi":
+      return "pi";
+    default:
+      // copilot-cli, gemini-cli — no chat-resolver mapping today.
+      return "standalone";
+  }
+}
+
+/**
+ * Build `LaunchMetadata` for the current invocation. Pulls session id from
+ * whichever source the caller says is authoritative:
+ *  - `hookEvent` for plan-review stdin JSON (carries `session_id`, `transcript_path`)
+ *  - `process.env.CODEX_THREAD_ID` when the origin is Codex
+ *  - neither, for Claude Code slash commands (resolver falls back to cwd heuristic)
+ */
+function synthesizeLaunchMetadata(args: {
+  invocation: Invocation;
+  cwd?: string;
+  hookEvent?: { session_id?: string; transcript_path?: string } | null;
+}): LaunchMetadata {
+  const harness = harnessFromOrigin(detectedOrigin);
+  const cwd = args.cwd ?? process.cwd();
+
+  // Codex shell-out always comes with CODEX_THREAD_ID. Prefer it over any
+  // other source when the origin indicates Codex, since the thread id is the
+  // fact Codex controls.
+  if (harness === "codex" && process.env.CODEX_THREAD_ID) {
+    return {
+      harness: "codex",
+      invocation: args.invocation,
+      cwd,
+      sessionId: process.env.CODEX_THREAD_ID,
+    };
+  }
+
+  // Claude Code hook path: stdin JSON carries `session_id` and
+  // `transcript_path`. Both fields are already extracted for Gemini's plan
+  // path reconstruction; we additionally preserve them for chat context.
+  if (harness === "claude-code" && args.hookEvent?.session_id) {
+    return {
+      harness: "claude-code",
+      invocation: args.invocation,
+      cwd,
+      sessionId: args.hookEvent.session_id,
+      transcriptPath: args.hookEvent.transcript_path,
+    };
+  }
+
+  // Claude Code slash command path: no session id in stdin or env. The
+  // resolver returns `fork_by_heuristic` and the downstream executor scans
+  // ~/.claude/sessions/ for the most-recent match by cwd.
+  if (harness === "claude-code") {
+    return { harness: "claude-code", invocation: args.invocation, cwd };
+  }
+
+  // Other origins (opencode, pi, standalone fallback) arrive via their own
+  // dedicated hosts (opencode-plugin, pi-extension), not through this binary.
+  // Default to standalone so the resolver produces `fresh`.
+  return { harness, invocation: args.invocation, cwd };
+}
 
 if (args[0] === "sessions") {
   // ============================================
@@ -410,6 +496,13 @@ if (args[0] === "sessions") {
     sharingEnabled,
     shareBaseUrl,
     htmlContent: reviewHtmlContent,
+    // `review` is either a Claude slash command (no sessionId → fork by
+    // heuristic) or a Codex shell-out (sessionId from CODEX_THREAD_ID →
+    // resume). The synthesizer picks the right harness/invocation pair.
+    launch: synthesizeLaunchMetadata({
+      invocation: detectedOrigin === "codex" ? "shell-out" : "slash",
+      cwd: agentCwd,
+    }),
     onCleanup: worktreeCleanup,
     onReady: async (url, isRemote, port) => {
       handleReviewServerReady(url, isRemote, port);
@@ -573,6 +666,9 @@ if (args[0] === "sessions") {
     shareBaseUrl,
     pasteApiUrl,
     htmlContent: planHtmlContent,
+    launch: synthesizeLaunchMetadata({
+      invocation: detectedOrigin === "codex" ? "shell-out" : "slash",
+    }),
     onReady: async (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);
 
@@ -697,6 +793,9 @@ if (args[0] === "sessions") {
     shareBaseUrl,
     pasteApiUrl,
     htmlContent: planHtmlContent,
+    launch: synthesizeLaunchMetadata({
+      invocation: detectedOrigin === "codex" ? "shell-out" : "slash",
+    }),
     onReady: async (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);
 
@@ -743,6 +842,7 @@ if (args[0] === "sessions") {
     sharingEnabled,
     shareBaseUrl,
     htmlContent: planHtmlContent,
+    launch: synthesizeLaunchMetadata({ invocation: "cli" }),
     onReady: (url, isRemote, port) => {
       handleServerReady(url, isRemote, port);
     },
@@ -805,6 +905,9 @@ if (args[0] === "sessions") {
     shareBaseUrl,
     pasteApiUrl,
     htmlContent: planHtmlContent,
+    // Copilot CLI isn't in the chat-resolver matrix; synthesizer collapses
+    // to harness: "standalone", resolver returns `fresh`.
+    launch: synthesizeLaunchMetadata({ invocation: "hook" }),
     onReady: async (url, isRemote, port) => {
       handleServerReady(url, isRemote, port);
 
@@ -888,6 +991,7 @@ if (args[0] === "sessions") {
     sharingEnabled,
     shareBaseUrl,
     htmlContent: planHtmlContent,
+    launch: synthesizeLaunchMetadata({ invocation: "cli" }),
     onReady: async (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);
 
@@ -1002,6 +1106,12 @@ if (args[0] === "sessions") {
     shareBaseUrl,
     pasteApiUrl,
     htmlContent: planHtmlContent,
+    launch: synthesizeLaunchMetadata({
+      invocation: "hook",
+      // For Gemini the resolver will see harness="standalone" → fresh; we
+      // still pass the event so `transcriptPath` is preserved for future use.
+      hookEvent: { session_id: event.session_id, transcript_path: event.transcript_path },
+    }),
     onReady: async (url, isRemote, port) => {
       handleServerReady(url, isRemote, port);
 

@@ -176,6 +176,7 @@ export interface AIQuestion {
 export interface AIResponse {
   questionId: string;
   text: string;
+  thinking?: string;
   isStreaming: boolean;
   error?: string;
   createdAt: number;

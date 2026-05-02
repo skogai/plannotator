@@ -233,6 +233,8 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/editor-annotation` | POST/DELETE | Add or remove an editor annotation (VS Code only) |
 | `/api/ai/capabilities` | GET | Check if AI features are available |
 | `/api/ai/session` | POST | Create or fork an AI session |
+| `/api/ai/session/:id/exists` | GET | 200/404 existence probe used by the client to decide reconnect vs fresh |
+| `/api/ai/session/:id/stream` | GET | Persistent SSE of the server-canonical transcript (snapshot on connect, then turn/delta events, 30s heartbeat) |
 | `/api/ai/query` | POST | Send a message and stream the response (SSE) |
 | `/api/ai/abort` | POST | Abort the current query |
 | `/api/ai/permission` | POST | Respond to a permission request |

@@ -58,11 +58,13 @@ export type {
   AIMessage,
   AITextMessage,
   AITextDeltaMessage,
+  AIThinkingDeltaMessage,
   AIToolUseMessage,
   AIToolResultMessage,
   AIErrorMessage,
   AIResultMessage,
   AIPermissionRequestMessage,
+  AIPermissionResolvedMessage,
   AIUnknownMessage,
   AIContext,
   AIContextMode,
@@ -71,11 +73,22 @@ export type {
   AnnotateContext,
   ParentSession,
   CreateSessionOptions,
+  ForkCandidate,
   ClaudeAgentSDKConfig,
   CodexSDKConfig,
   PiSDKConfig,
   OpenCodeConfig,
 } from "./types.ts";
+
+// Chat context resolver
+export { resolveChatContext, logResolvedContext } from "./resolve-context.ts";
+export type {
+  Harness,
+  Invocation,
+  LaunchMetadata,
+  ChatContextStrategy,
+  ResolveDebugLog,
+} from "./resolve-context.ts";
 
 // Provider registry
 export {
@@ -92,7 +105,7 @@ export { BaseSession } from "./base-session.ts";
 
 // Session manager
 export { SessionManager } from "./session-manager.ts";
-export type { SessionEntry, SessionManagerOptions } from "./session-manager.ts";
+export type { SessionEntry, SessionManagerOptions, TrackOptions } from "./session-manager.ts";
 
 // HTTP endpoints
 export { createAIEndpoints } from "./endpoints.ts";

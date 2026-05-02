@@ -81,12 +81,14 @@ describe("SessionManager", () => {
     const s1 = mockSession("s1");
     const s2 = mockSession("s2");
 
-    const e1 = sm.track(s1, "plan-review", "First");
-    const e2 = sm.track(s2, "code-review", "Second");
+    const e1 = sm.track(s1, "plan-review", { label: "First" });
+    const e2 = sm.track(s2, "code-review", { label: "Second" });
     e1.lastActiveAt = 1000;
     e2.lastActiveAt = 2000;
 
     expect(sm.size).toBe(2);
+    expect(e1.label).toBe("First");
+    expect(e2.label).toBe("Second");
     const list = sm.list();
     expect(list[0].session.id).toBe("s2");
     expect(list[1].session.id).toBe("s1");

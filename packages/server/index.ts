@@ -10,6 +10,7 @@
  */
 
 import type { Origin } from "@plannotator/shared/agents";
+import type { LaunchMetadata } from "@plannotator/ai";
 import { resolve } from "path";
 import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
 import { openEditorDiff } from "./ide";
@@ -79,6 +80,12 @@ export interface ServerOptions {
   mode?: "archive";
   /** Custom plan save path — used by archive mode to find saved plans */
   customPlanPath?: string | null;
+  /**
+   * Chat launch metadata — who invoked Plannotator and what session context
+   * they carry. Used by the AI chat layer to pick a fork/resume/fresh strategy.
+   * If absent the chat falls back to `fresh`. See `packages/ai/resolve-context.ts`.
+   */
+  launch?: LaunchMetadata;
 }
 
 export interface ServerResult {
@@ -202,6 +209,10 @@ export async function startPlannotatorServer(
       server = Bun.serve({
         hostname: getServerHostname(),
         port: configuredPort,
+        // Disable Bun's default 10s idle timeout. External-annotations SSE
+        // and any future chat streams here need longer-lived connections
+        // than the default allows.
+        idleTimeout: 0,
 
         async fetch(req, server) {
           const url = new URL(req.url);

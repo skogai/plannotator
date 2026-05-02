@@ -16,9 +16,11 @@ import type {
 	AIProvider,
 	AIProviderCapabilities,
 	CreateSessionOptions,
+	ForkCandidate,
 	PiSDKConfig,
 } from "../types.ts";
 import { registerProviderFactory } from "../provider.ts";
+import { listPiForkCandidates } from "./pi-sdk.ts";
 
 // Re-export mapPiEvent from shared (runtime-agnostic)
 export { mapPiEvent } from "./pi-events.ts";
@@ -154,8 +156,11 @@ class PiProcessNode {
 export class PiSDKNodeProvider implements AIProvider {
 	readonly name = PROVIDER_NAME;
 	readonly capabilities: AIProviderCapabilities = {
-		fork: false,
-		resume: false,
+		// See pi-sdk.ts for rationale. Pi RPC supports fork/switch_session;
+		// the resolver chooses fork_by_id vs resume_by_id based on whether
+		// a user-message entryId is available on the launch metadata.
+		fork: true,
+		resume: true,
 		streaming: true,
 		tools: true,
 	};
@@ -180,15 +185,50 @@ export class PiSDKNodeProvider implements AIProvider {
 		return session;
 	}
 
-	async forkSession(): Promise<never> {
-		throw new Error(
-			"Pi does not support session forking. " +
-				"The endpoint layer should fall back to createSession().",
-		);
+	async forkSession(options: CreateSessionOptions): Promise<PiSDKNodeSession> {
+		const parent = options.context.parent;
+		if (!parent?.sessionPath || !parent?.entryId) {
+			throw new Error(
+				"Pi fork requires `sessionPath` and `entryId` on context.parent. " +
+					"The resolver should produce `fork_by_id` only when both are available; " +
+					"a launch without `entryId` should produce `resume_by_id` instead.",
+			);
+		}
+		const session = new PiSDKNodeSession({
+			systemPrompt: null,
+			cwd: options.cwd ?? parent.cwd ?? this.config.cwd ?? process.cwd(),
+			parentSessionId: parent.sessionId ?? null,
+			piExecutablePath: this.config.piExecutablePath ?? "pi",
+			model: options.model ?? this.config.model,
+			initialRpcCommands: [
+				{ type: "switch_session", sessionPath: parent.sessionPath },
+				{ type: "fork", entryId: parent.entryId },
+			],
+		});
+		this.sessions.set(session.id, session);
+		return session;
 	}
 
-	async resumeSession(): Promise<never> {
-		throw new Error("Pi does not support session resuming.");
+	async resumeSession(sessionPath: string): Promise<PiSDKNodeSession> {
+		if (!sessionPath) {
+			throw new Error("Pi resumeSession requires a session path.");
+		}
+		const session = new PiSDKNodeSession({
+			systemPrompt: null,
+			cwd: this.config.cwd ?? process.cwd(),
+			parentSessionId: null,
+			piExecutablePath: this.config.piExecutablePath ?? "pi",
+			model: this.config.model,
+			initialRpcCommands: [
+				{ type: "switch_session", sessionPath },
+			],
+		});
+		this.sessions.set(session.id, session);
+		return session;
+	}
+
+	async listForkCandidates(cwd: string, limit = 5): Promise<ForkCandidate[]> {
+		return listPiForkCandidates(cwd, limit);
 	}
 
 	dispose(): void {
@@ -233,11 +273,13 @@ export class PiSDKNodeProvider implements AIProvider {
 // ---------------------------------------------------------------------------
 
 interface SessionConfig {
-	systemPrompt: string;
+	systemPrompt: string | null;
 	cwd: string;
 	parentSessionId: string | null;
 	piExecutablePath: string;
 	model?: string;
+	/** See pi-sdk.ts. Init-time RPC commands run before the first prompt. */
+	initialRpcCommands?: Array<Record<string, unknown>>;
 }
 
 class PiSDKNodeSession extends BaseSession {
@@ -263,6 +305,30 @@ class PiSDKNodeSession extends BaseSession {
 			if (!this.process || !this.process.alive) {
 				this.process = new PiProcessNode();
 				await this.process.spawn(this.config.piExecutablePath, this.config.cwd);
+
+				// Init RPC (switch_session / fork) before set_model so the
+				// subsequent state applies to the loaded-or-forked session.
+				if (this.config.initialRpcCommands?.length) {
+					for (const cmd of this.config.initialRpcCommands) {
+						try {
+							await this.process.sendAndWait(cmd);
+						} catch (err) {
+							const kind =
+								typeof cmd.type === "string" ? cmd.type : "rpc";
+							// Kill the subprocess so the next query doesn't
+							// land on partial init state (e.g. switch_session
+							// applied but fork rejected). See pi-sdk.ts for rationale.
+							this.process?.kill();
+							this.process = null;
+							yield {
+								type: "error",
+								error: `Pi ${kind} failed: ${err instanceof Error ? err.message : String(err)}`,
+								code: "pi_init_error",
+							};
+							return;
+						}
+					}
+				}
 
 				if (this.config.model) {
 					const [provider, ...rest] = this.config.model.split("/");

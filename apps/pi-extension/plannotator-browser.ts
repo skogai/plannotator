@@ -102,6 +102,122 @@ export async function getLastAssistantMessageText(ctx: ExtensionContext): Promis
 	return null;
 }
 
+// ---------------------------------------------------------------------------
+// Launch metadata capture (Slice 1 PR 1, Step 2)
+// ---------------------------------------------------------------------------
+//
+// Mirrors `LaunchMetadata` from @plannotator/ai. Pi extension doesn't
+// depend on @plannotator/ai directly (it's a published package with a
+// minimal dependency set), so the type is inlined here. Step 5 of Slice 1
+// PR 1 wires this through the Pi server's future AI endpoints; until then,
+// capture exists so we can verify behavior in diagnostic logs.
+export interface PiLaunchMetadata {
+	harness: "pi";
+	invocation: "extension";
+	cwd: string;
+	sessionId?: string;
+	sessionPath?: string;
+	entryId?: string;
+}
+
+/**
+ * Structured diagnostic log for captured Pi launch metadata. Emits on every
+ * server-start until Step 5 wires the metadata into the Pi server's AI
+ * endpoint factory; the server-side `logResolvedContext` will cover post-Step-5.
+ */
+export function logPiLaunchCapture(
+	meta: PiLaunchMetadata | undefined,
+	source: string,
+): void {
+	const entry = meta
+		? {
+				captured: true,
+				source,
+				harness: meta.harness,
+				invocation: meta.invocation,
+				cwd: meta.cwd,
+				sessionId: meta.sessionId,
+				hasSessionPath: !!meta.sessionPath,
+				hasEntryId: !!meta.entryId,
+				ts: Date.now(),
+			}
+		: { captured: false, source, ts: Date.now() };
+	console.log(`[plannotator-pi] launch-metadata capture: ${JSON.stringify(entry)}`);
+}
+
+/**
+ * Read Pi session state from ExtensionContext to build launch metadata.
+ *
+ * Uses `ctx.sessionManager`'s read-only API (`getSessionId`, `getSessionFile`,
+ * `getBranch`) — no JSONL file parsing. Returns `undefined` if no session
+ * path is available (e.g., `--no-session`, brand-new session before
+ * persistence, session file deleted).
+ */
+export function capturePiLaunchMetadata(ctx: ExtensionContext): PiLaunchMetadata | undefined {
+	const cwd = (() => {
+		try {
+			return ctx.sessionManager.getCwd() ?? process.cwd();
+		} catch {
+			return process.cwd();
+		}
+	})();
+
+	let sessionId: string | undefined;
+	let sessionPath: string | undefined;
+	try {
+		sessionId = ctx.sessionManager.getSessionId();
+	} catch {
+		// `getSessionId` isn't expected to throw, but treat any failure as "no id".
+	}
+	try {
+		sessionPath = ctx.sessionManager.getSessionFile();
+	} catch {
+		// No persistence yet, or --no-session.
+	}
+
+	// No path means no Pi RPC `switch_session` target. Fall through to
+	// `undefined` and the resolver will produce `fresh` downstream.
+	if (!sessionPath) {
+		return undefined;
+	}
+
+	// Find the last user-message entry in the current branch. Pi's RPC
+	// `fork` command takes a user-message entryId; if there is no such
+	// entry yet, we still return launch metadata (sessionPath-only), which
+	// the resolver will treat as `resume_by_id` (switch-session, no fork).
+	let entryId: string | undefined;
+	try {
+		const branch = ctx.sessionManager.getBranch();
+		for (let i = branch.length - 1; i >= 0; i--) {
+			const entry = branch[i] as {
+				id?: string;
+				type?: string;
+				message?: { role?: string };
+			};
+			if (
+				entry?.type === "message" &&
+				entry.message?.role === "user" &&
+				typeof entry.id === "string"
+			) {
+				entryId = entry.id;
+				break;
+			}
+		}
+	} catch {
+		// No branch accessor or unexpected shape — leave entryId undefined.
+	}
+
+	const meta: PiLaunchMetadata = {
+		harness: "pi",
+		invocation: "extension",
+		cwd,
+		sessionPath,
+	};
+	if (sessionId) meta.sessionId = sessionId;
+	if (entryId) meta.entryId = entryId;
+	return meta;
+}
+
 function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): void {
 	const browserResult = openBrowser(serverUrl);
 	if (browserResult.isRemote) {
@@ -131,6 +247,11 @@ export async function startPlanReviewBrowserSession(
 	if (!ctx.hasUI || !planHtmlContent) {
 		throw new Error("Plannotator browser review is unavailable in this session.");
 	}
+
+	// Capture launch metadata from the Pi session. Step 5 of Slice 1 PR 1
+	// will thread this into the Pi server's AI endpoint factory once those
+	// endpoints exist; until then, capture is a diagnostic beachhead.
+	logPiLaunchCapture(capturePiLaunchMetadata(ctx), "plan-review");
 
 	const server = await startPlanReviewServer({
 		plan: planContent,
@@ -344,6 +465,8 @@ export async function openCodeReview(
 		diffError = result.error;
 	}
 
+	logPiLaunchCapture(capturePiLaunchMetadata(ctx), "code-review");
+
 	const server = await startReviewServer({
 		rawPatch,
 		gitRef,
@@ -386,6 +509,8 @@ export async function openMarkdownAnnotation(
 		}
 	}
 
+	logPiLaunchCapture(capturePiLaunchMetadata(ctx), `annotate (${mode})`);
+
 	const server = await startAnnotateServer({
 		markdown: resolvedMarkdown,
 		filePath,
@@ -416,6 +541,8 @@ export async function openArchiveBrowserAction(
 	if (!ctx.hasUI || !planHtmlContent) {
 		throw new Error("Plannotator archive browser is unavailable in this session.");
 	}
+
+	logPiLaunchCapture(capturePiLaunchMetadata(ctx), "archive");
 
 	const server = await startPlanReviewServer({
 		plan: "",

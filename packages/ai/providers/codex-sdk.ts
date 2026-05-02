@@ -8,6 +8,27 @@
  * - Stream text deltas back to the UI in real time
  *
  * Sessions default to read-only sandbox mode for safety in inline chat.
+ *
+ * IMPORTANT: **The chat path MUST NOT pass `--ephemeral`** (or the SDK
+ * equivalent option) to Codex. Ephemeral threads write no rollout file and
+ * cannot be resumed, which silently breaks every chat reconnect and every
+ * `resume_by_id` strategy produced by the context resolver. Background
+ * review jobs may still use ephemeral threads — they don't resume. Audited
+ * on this branch: no `--ephemeral` references in any chat code path.
+ *
+ * CONCURRENT WRITER RACE: Codex's app-server rejects a second `thread/resume`
+ * while the user is actively generating in their terminal ("thread {id} is
+ * closing; retry thread/resume after the thread is closed"). We retry with
+ * exponential backoff below — the user gets a clean "Codex is busy" error
+ * after retries are exhausted instead of a raw protocol message.
+ *
+ * PROMPT CACHING: OpenAI's backend caches prefix hashes automatically. The
+ * SDK doesn't expose `prompt_cache_key` or `prompt_cache_retention` as
+ * parameters (confirmed by grep of the SDK's index.d.ts), so we don't pass
+ * one. Cache-affinity routing still works because we reuse the same thread
+ * (and therefore the same conversation prefix) across turns of a given
+ * Plannotator chat session. Verify via the `cached_input_tokens` field on
+ * the turn result — it's non-zero on the second turn onwards when cache hits.
  */
 
 import { buildSystemPrompt, buildEffectivePrompt } from "../context.ts";
@@ -19,6 +40,7 @@ import type {
   AIMessage,
   CreateSessionOptions,
   CodexSDKConfig,
+  ForkCandidate,
 } from "../types.ts";
 
 // ---------------------------------------------------------------------------
@@ -27,6 +49,60 @@ import type {
 
 const PROVIDER_NAME = "codex-sdk";
 const DEFAULT_MODEL = "gpt-5.4";
+
+// Concurrent-writer retry schedule. Codex app-server rejects `thread/resume`
+// while the user's terminal has the thread open ("thread {id} is closing").
+// These delays are tuned to let a typical user-initiated turn complete
+// (seconds to tens of seconds) before giving up.
+const CODEX_BUSY_RETRY_DELAYS_MS = [500, 1000, 2000, 4000, 10_000] as const;
+
+/** Matches Codex app-server's concurrent-writer rejection message. */
+const CODEX_BUSY_MESSAGE_RE = /thread \S+ is closing/i;
+
+/**
+ * Typed error for "Codex is actively generating in another process."
+ * Carries the original error so diagnostics aren't lost, and lets the
+ * query loop surface a user-facing message with a stable error code.
+ */
+class CodexBusyError extends Error {
+  readonly original: unknown;
+  constructor(original: unknown) {
+    super(original instanceof Error ? original.message : String(original));
+    this.name = "CodexBusyError";
+    this.original = original;
+  }
+}
+
+/**
+ * Wait for `ms` unless the signal fires first. Used between retries so a
+ * user hitting Abort during the backoff cancels the whole retry chain
+ * instead of sitting through the full delay.
+ */
+function waitOrAbort(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * Returns true if `err` matches Codex's concurrent-writer rejection.
+ */
+function isBusyError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return CODEX_BUSY_MESSAGE_RE.test(message);
+}
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -81,6 +157,25 @@ export class CodexSDKProvider implements AIProvider {
     });
   }
 
+  async listForkCandidates(_cwd: string, _limit = 5): Promise<ForkCandidate[]> {
+    // Codex has no "fork" primitive — resumeThread mutates the thread.
+    // Surfacing arbitrary recent threads would let the user accidentally
+    // interleave plannotator's messages into a colleague-shared thread.
+    // Expose only the user's current terminal thread (CODEX_THREAD_ID) —
+    // they already know this thread exists; the warning in the client
+    // reminds them that picking it will mix conversations.
+    const threadId = process.env.CODEX_THREAD_ID;
+    if (!threadId) return [];
+    return [{
+      id: threadId,
+      label: "Codex terminal thread",
+      lastActiveAt: Date.now(),
+      preview: `Thread ${threadId.slice(0, 8)}`,
+      parentFields: { threadId },
+      inheritance: "resume",
+    }];
+  }
+
   dispose(): void {
     // No persistent resources to clean up
   }
@@ -92,6 +187,7 @@ export class CodexSDKProvider implements AIProvider {
       sandboxMode: this.config.sandboxMode ?? "read-only" as const,
       codexExecutablePath: this.config.codexExecutablePath,
       reasoningEffort: options?.reasoningEffort,
+      serviceTier: options?.serviceTier,
     };
   }
 }
@@ -126,6 +222,7 @@ interface SessionConfig {
   resumeThreadId?: string;
   codexExecutablePath?: string;
   reasoningEffort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+  serviceTier?: "fast" | "flex" | null;
 }
 
 class CodexSDKSession extends BaseSession {
@@ -174,6 +271,7 @@ class CodexSDKSession extends BaseSession {
             workingDirectory: this.config.cwd,
             sandboxMode: this.config.sandboxMode,
             ...(this.config.reasoningEffort && { modelReasoningEffort: this.config.reasoningEffort }),
+            ...(this.config.serviceTier && { serviceTier: this.config.serviceTier }),
           });
         } else {
           this._thread = this._codexInstance.startThread({
@@ -181,6 +279,7 @@ class CodexSDKSession extends BaseSession {
             workingDirectory: this.config.cwd,
             sandboxMode: this.config.sandboxMode,
             ...(this.config.reasoningEffort && { modelReasoningEffort: this.config.reasoningEffort }),
+            ...(this.config.serviceTier && { serviceTier: this.config.serviceTier }),
           });
         }
       }
@@ -190,47 +289,86 @@ class CodexSDKSession extends BaseSession {
         this.config.systemPrompt,
         this._firstQuerySent,
       );
-      const streamed = await this._thread.runStreamed(effectivePrompt, {
-        signal,
-      });
 
-      this._firstQuerySent = true;
-      let turnFailed = false;
+      // Retry on "thread {id} is closing" — the Codex app-server rejects a
+      // second writer while the user's terminal has the thread open.
+      // The busy error surfaces during iteration (runStreamed returns a lazy
+      // generator), so the retry wraps the entire runStreamed + for-await.
+      // The loop exits in exactly three ways: `break` on success,
+      // `throw err` for non-busy errors, `throw new CodexBusyError(err)`
+      // after the final busy retry is exhausted.
+      //
+      // Retry safety: a fresh runStreamed replays the turn from the first
+      // event. If the previous attempt already yielded any messages
+      // downstream, retrying would duplicate them in the session manager's
+      // broadcast and the client's transcript. Track `emittedThisAttempt`
+      // and escalate past-first-emission failures as CodexBusyError
+      // immediately — the user sees a clean "Codex is busy" instead of
+      // duplicated text.
+      for (let attempt = 0; attempt <= CODEX_BUSY_RETRY_DELAYS_MS.length; attempt++) {
+        let emittedThisAttempt = false;
+        try {
+          const streamed = await this._thread.runStreamed(effectivePrompt, { signal });
 
-      for await (const event of streamed.events) {
-        // ID resolution from thread.started
-        if (
-          !this._resolvedId &&
-          event.type === "thread.started" &&
-          typeof event.thread_id === "string"
-        ) {
-          this.resolveId(event.thread_id);
+          this._firstQuerySent = true;
+          let turnFailed = false;
+
+          for await (const event of streamed.events) {
+            if (
+              !this._resolvedId &&
+              event.type === "thread.started" &&
+              typeof event.thread_id === "string"
+            ) {
+              this.resolveId(event.thread_id);
+            }
+
+            if (event.type === "turn.failed") {
+              turnFailed = true;
+            }
+
+            const mapped = mapCodexEvent(event, this._itemTextOffsets);
+            for (const msg of mapped) {
+              emittedThisAttempt = true;
+              yield msg;
+            }
+          }
+
+          if (!turnFailed) {
+            yield { type: "result", sessionId: this.id, success: true };
+          }
+          break;
+        } catch (err) {
+          if (!isBusyError(err)) throw err;
+          // If we've already yielded something, retrying would duplicate
+          // that output on the next runStreamed pass. Surface the busy
+          // error immediately rather than risk the double.
+          if (emittedThisAttempt) {
+            throw new CodexBusyError(err);
+          }
+          if (attempt === CODEX_BUSY_RETRY_DELAYS_MS.length) {
+            throw new CodexBusyError(err);
+          }
+          this._itemTextOffsets.clear();
+          await waitOrAbort(CODEX_BUSY_RETRY_DELAYS_MS[attempt]!, signal);
         }
-
-        if (event.type === "turn.failed") {
-          turnFailed = true;
-        }
-
-        const mapped = mapCodexEvent(event, this._itemTextOffsets);
-        for (const msg of mapped) {
-          yield msg;
-        }
-      }
-
-      // Emit synthetic result after stream ends
-      if (!turnFailed) {
-        yield {
-          type: "result",
-          sessionId: this.id,
-          success: true,
-        };
       }
     } catch (err) {
-      yield {
-        type: "error",
-        error: err instanceof Error ? err.message : String(err),
-        code: "provider_error",
-      };
+      if (err instanceof CodexBusyError) {
+        // User-facing message — the UI can match on `code: "codex_busy"`
+        // to render a specific "wait for the current turn" prompt.
+        yield {
+          type: "error",
+          error:
+            "Codex is busy — wait for the current turn in your terminal to complete, then try again.",
+          code: "codex_busy",
+        };
+      } else {
+        yield {
+          type: "error",
+          error: err instanceof Error ? err.message : String(err),
+          code: "provider_error",
+        };
+      }
     } finally {
       this.endQuery(gen);
     }

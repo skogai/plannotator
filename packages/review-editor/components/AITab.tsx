@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback, memo } from 'react';
-import type { AIChatEntry, PendingPermission } from '../hooks/useAIChat';
+import type { AIChatEntry, PendingPermission, ChatContextStrategy } from '../hooks/useAIChat';
+import { ContextBadge } from './ContextBadge';
 import { renderChatMarkdown } from '../utils/renderChatMarkdown';
 import { formatLineRange } from '../utils/formatLineRange';
 import { formatRelativeTime } from '../utils/formatRelativeTime';
@@ -7,7 +8,7 @@ import { SparklesIcon } from './SparklesIcon';
 import { CountBadge } from './CountBadge';
 import { CopyButton } from './CopyButton';
 import { PermissionCard } from './PermissionCard';
-import { AIConfigBar } from './AIConfigBar';
+import { AIConfigBar, type SelectedContext, type ForkCandidateSummary } from './AIConfigBar';
 import { submitHint } from '@plannotator/ui/utils/platform';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 
@@ -28,9 +29,15 @@ interface AITabProps {
   permissionRequests?: PendingPermission[];
   onRespondToPermission?: (requestId: string, allow: boolean) => void;
   aiProviders?: AIProviderInfo[];
-  aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
-  onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
+  aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null; thinking?: 'adaptive' | 'disabled' | null; context?: SelectedContext };
+  onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null; thinking?: 'adaptive' | 'disabled' | null; context?: SelectedContext }) => void;
+  /** Fetch fork/resume candidates for the current provider + cwd. */
+  fetchContextCandidates?: () => Promise<ForkCandidateSummary[]>;
   hasAISession?: boolean;
+  /** Resolved chat-context strategy from useAIChat — renders the header badge. */
+  strategy?: ChatContextStrategy | null;
+  /** Reconnect-in-progress flag from useAIChat — renders a muted pill next to the badge. */
+  isReconnecting?: boolean;
 }
 
 interface FileGroup {
@@ -43,6 +50,8 @@ function getQuestionScope(q: AIChatEntry['question']): 'general' | 'file' | 'lin
   if (q.lineStart == null) return 'file';
   return 'line';
 }
+
+const emptyCandidates = async () => [];
 
 export const AITab: React.FC<AITabProps> = ({
   messages,
@@ -57,7 +66,10 @@ export const AITab: React.FC<AITabProps> = ({
   aiProviders = [],
   aiConfig,
   onAIConfigChange,
+  fetchContextCandidates,
   hasAISession = false,
+  strategy = null,
+  isReconnecting = false,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
@@ -164,6 +176,9 @@ export const AITab: React.FC<AITabProps> = ({
   if (messages.length === 0 && !isCreatingSession) {
     return (
       <div className="flex flex-col h-full">
+        {(strategy || isReconnecting) && (
+          <ContextBadge strategy={strategy} isReconnecting={isReconnecting} />
+        )}
         <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground px-4 py-12 text-center">
           <div className="w-10 h-10 rounded-full bg-muted/50 flex items-center justify-center mb-3">
             <SparklesIcon className="w-5 h-5" />
@@ -180,6 +195,11 @@ export const AITab: React.FC<AITabProps> = ({
           onModelChange={(model) => onAIConfigChange?.({ model })}
           selectedReasoningEffort={aiConfig?.reasoningEffort ?? null}
           onReasoningEffortChange={(effort) => onAIConfigChange?.({ reasoningEffort: effort })}
+          selectedThinking={aiConfig?.thinking ?? null}
+          onThinkingChange={(t) => onAIConfigChange?.({ thinking: t })}
+          selectedContext={aiConfig?.context ?? null}
+          onContextChange={(c) => onAIConfigChange?.({ context: c })}
+          fetchContextCandidates={fetchContextCandidates ?? emptyCandidates}
           hasSession={hasAISession}
         />
         {onAskGeneral && <GeneralInput value={generalInput} onChange={setGeneralInput} onSubmit={handleGeneralSubmit} disabled={isStreaming} />}
@@ -189,6 +209,9 @@ export const AITab: React.FC<AITabProps> = ({
 
   return (
     <div className="flex flex-col h-full">
+      {(strategy || isReconnecting) && (
+        <ContextBadge strategy={strategy} isReconnecting={isReconnecting} />
+      )}
       <OverlayScrollArea className="flex-1 min-h-0">
       <div ref={scrollRef} className="p-2">
         {isCreatingSession && messages.length === 0 && (
@@ -274,6 +297,11 @@ export const AITab: React.FC<AITabProps> = ({
         onModelChange={(model) => onAIConfigChange?.({ model })}
         selectedReasoningEffort={aiConfig?.reasoningEffort ?? null}
         onReasoningEffortChange={(effort) => onAIConfigChange?.({ reasoningEffort: effort })}
+        selectedThinking={aiConfig?.thinking ?? null}
+        onThinkingChange={(t) => onAIConfigChange?.({ thinking: t })}
+        selectedContext={aiConfig?.context ?? null}
+        onContextChange={(c) => onAIConfigChange?.({ context: c })}
+        fetchContextCandidates={fetchContextCandidates ?? emptyCandidates}
         hasSession={hasAISession}
       />
 
@@ -348,6 +376,19 @@ const QAPair = memo<{
     [response.text],
   );
 
+  const hasThinking = !!response.thinking;
+  const hasText = !!response.text;
+  const thinkingOnly = hasThinking && !hasText && response.isStreaming;
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  const wasThinkingOnly = useRef(false);
+
+  useEffect(() => {
+    if (wasThinkingOnly.current && !thinkingOnly && detailsRef.current) {
+      detailsRef.current.open = false;
+    }
+    wasThinkingOnly.current = thinkingOnly;
+  }, [thinkingOnly]);
+
   return (
     <div data-question-id={question.id} className="flex flex-col gap-1.5">
       {/* Question */}
@@ -379,13 +420,25 @@ const QAPair = memo<{
       <div className="group relative p-2.5 rounded-lg border border-border/50 bg-popover/50 hover:bg-muted/30 transition-colors">
         {response.error ? (
           <p className="text-xs text-destructive">{response.error}</p>
-        ) : response.text ? (
+        ) : hasText || hasThinking ? (
           <>
-            <div className="text-xs review-comment-body">
-              {renderedResponse}
-              {response.isStreaming && <span className="ai-streaming-cursor inline-block ml-0.5" />}
-            </div>
-            {!response.isStreaming && <CopyButton text={response.text} />}
+            {hasThinking && (
+              <details ref={detailsRef} open={thinkingOnly || undefined} className="mb-2">
+                <summary className="text-[10px] text-muted-foreground/60 cursor-pointer select-none hover:text-muted-foreground transition-colors">
+                  Thinking{thinkingOnly && <span className="ai-streaming-cursor inline-block ml-0.5" />}
+                </summary>
+                <div className="mt-1 pl-2 border-l border-border/30 text-[11px] text-muted-foreground/70 whitespace-pre-wrap break-words leading-relaxed">
+                  {response.thinking}
+                </div>
+              </details>
+            )}
+            {hasText && (
+              <div className="text-xs review-comment-body">
+                {renderedResponse}
+                {response.isStreaming && <span className="ai-streaming-cursor inline-block ml-0.5" />}
+              </div>
+            )}
+            {!response.isStreaming && hasText && <CopyButton text={response.text} />}
           </>
         ) : response.isStreaming ? (
           <span className="text-xs text-muted-foreground">

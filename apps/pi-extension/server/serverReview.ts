@@ -299,9 +299,14 @@ export async function startReviewServer(options: {
 	});
 
 	// AI provider setup (graceful — AI features degrade if SDK unavailable)
-	// Types are `any` because @plannotator/ai is a dynamic import
-	let aiEndpoints: Record<string, (req: Request) => Promise<Response>> | null =
-		null;
+	// Types are `any` because @plannotator/ai is a dynamic import. Shape
+	// mirrors the Bun server's: a record of static handlers plus a
+	// `handleDynamic` method for parameterized routes (/api/ai/session/:id/*).
+	let aiEndpoints:
+		| (Record<string, (req: Request) => Promise<Response>> & {
+				handleDynamic?: (req: Request, url: URL) => Promise<Response | null>;
+		  })
+		| null = null;
 	let aiSessionManager: { disposeAll: () => void } | null = null;
 	let aiRegistry: { disposeAll: () => void } | null = null;
 	try {
@@ -401,6 +406,24 @@ export async function startReviewServer(options: {
 				registry,
 				sessionManager,
 				getCwd: resolveAgentCwd,
+				// Keep the chat SSE alive through corporate proxies and dev
+				// tunnels that aggressively close idle TCP sockets. Matches
+				// the helper packages/server exposes to the Bun review server
+				// — inlined here because pi-extension is a standalone package
+				// with no monorepo package deps.
+				startHeartbeat: (controller, options) => {
+					const intervalMs = options?.intervalMs ?? 30_000;
+					const encoder = new TextEncoder();
+					const timer = setInterval(() => {
+						try {
+							controller.enqueue(encoder.encode(":\n\n"));
+						} catch {
+							clearInterval(timer);
+							options?.onFailure?.();
+						}
+					}, intervalMs);
+					return () => clearInterval(timer);
+				},
 			});
 			aiSessionManager = sessionManager;
 			aiRegistry = registry;
@@ -656,33 +679,51 @@ export async function startReviewServer(options: {
 		} else if (await agentJobs.handle(req, res, url)) {
 			return;
 		} else if (aiEndpoints && url.pathname.startsWith("/api/ai/")) {
-			const handler = aiEndpoints[url.pathname];
-			if (handler) {
-				try {
-					const webReq = toWebRequest(req);
-					const webRes = await handler(webReq);
-					// Pipe Web Response → node:http response
-					const headers: Record<string, string> = {};
-					webRes.headers.forEach((v, k) => {
-						headers[k] = v;
-					});
-					res.writeHead(webRes.status, headers);
-					if (webRes.body) {
-						const nodeStream = Readable.fromWeb(webRes.body as any);
-						nodeStream.pipe(res);
-					} else {
-						res.end();
-					}
-				} catch (err) {
-					json(
-						res,
-						{ error: err instanceof Error ? err.message : "AI endpoint error" },
-						500,
-					);
+			// Helper: pipe a Web Response through node:http's res, including
+			// streaming body support (used by the SSE session stream).
+			const pipeWebResponse = async (webRes: Response): Promise<void> => {
+				const headers: Record<string, string> = {};
+				webRes.headers.forEach((v, k) => {
+					headers[k] = v;
+				});
+				res.writeHead(webRes.status, headers);
+				if (webRes.body) {
+					const nodeStream = Readable.fromWeb(webRes.body as any);
+					nodeStream.pipe(res);
+				} else {
+					res.end();
 				}
-				return;
+			};
+
+			try {
+				const webReq = toWebRequest(req);
+				// Static route first (exact path lookup).
+				const staticHandler = aiEndpoints[url.pathname];
+				if (typeof staticHandler === "function") {
+					await pipeWebResponse(await staticHandler(webReq));
+					return;
+				}
+				// Parameterized routes — /api/ai/session/:id/stream,
+				// /api/ai/session/:id/exists — dispatched via handleDynamic.
+				// Without this, refresh-survival breaks under Pi: the session
+				// stream EventSource gets 404 and the client enters the
+				// cookie-clear/fresh-session path on every reconnect.
+				if (typeof aiEndpoints.handleDynamic === "function") {
+					const dynamic = await aiEndpoints.handleDynamic(webReq, url);
+					if (dynamic) {
+						await pipeWebResponse(dynamic);
+						return;
+					}
+				}
+				json(res, { error: "Not found" }, 404);
+			} catch (err) {
+				json(
+					res,
+					{ error: err instanceof Error ? err.message : "AI endpoint error" },
+					500,
+				);
 			}
-			json(res, { error: "Not found" }, 404);
+			return;
 		} else if (url.pathname === "/api/exit" && req.method === "POST") {
 			deleteDraft(draftKey);
 			resolveDecision({ approved: false, feedback: '', annotations: [], exit: true });

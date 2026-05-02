@@ -49,9 +49,12 @@ interface ReviewSidebarProps {
   aiPermissionRequests?: import('../hooks/useAIChat').PendingPermission[];
   onRespondToPermission?: (requestId: string, allow: boolean) => void;
   aiProviders?: Array<{ id: string; name: string; models?: Array<{ id: string; label: string; default?: boolean }> }>;
-  aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
-  onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
+  aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null; thinking?: 'adaptive' | 'disabled' | null; context?: import('./AIConfigBar').SelectedContext };
+  onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null; thinking?: 'adaptive' | 'disabled' | null; context?: import('./AIConfigBar').SelectedContext }) => void;
+  aiFetchContextCandidates?: () => Promise<import('./AIConfigBar').ForkCandidateSummary[]>;
   hasAISession?: boolean;
+  aiStrategy?: import('../hooks/useAIChat').ChatContextStrategy | null;
+  aiIsReconnecting?: boolean;
   // Agent props
   agentJobs?: AgentJobInfo[];
   agentCapabilities?: AgentCapabilities | null;
@@ -137,7 +140,10 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   aiProviders,
   aiConfig,
   onAIConfigChange,
+  aiFetchContextCandidates,
   hasAISession,
+  aiStrategy = null,
+  aiIsReconnecting = false,
   agentJobs,
   agentCapabilities,
   onAgentLaunch,
@@ -423,7 +429,10 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
               aiProviders={aiProviders}
               aiConfig={aiConfig}
               onAIConfigChange={onAIConfigChange}
+              fetchContextCandidates={aiFetchContextCandidates}
               hasAISession={hasAISession}
+              strategy={aiStrategy}
+              isReconnecting={aiIsReconnecting}
             />
           )}
 

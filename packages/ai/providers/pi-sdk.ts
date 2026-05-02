@@ -14,6 +14,7 @@ import type {
 	AIProvider,
 	AIProviderCapabilities,
 	CreateSessionOptions,
+	ForkCandidate,
 	PiSDKConfig,
 } from "../types.ts";
 
@@ -172,8 +173,12 @@ class PiProcess {
 export class PiSDKProvider implements AIProvider {
 	readonly name = PROVIDER_NAME;
 	readonly capabilities: AIProviderCapabilities = {
-		fork: false,
-		resume: false,
+		// Pi RPC supports both via `switch_session` + `fork` commands
+		// (pi/packages/coding-agent/src/modes/rpc/rpc-types.ts:58). The
+		// resolver produces `fork_by_id` only when both `sessionPath` and a
+		// user-message `entryId` are available on ctx.parent.
+		fork: true,
+		resume: true,
 		streaming: true,
 		tools: true,
 	};
@@ -198,15 +203,56 @@ export class PiSDKProvider implements AIProvider {
 		return session;
 	}
 
-	async forkSession(): Promise<never> {
-		throw new Error(
-			"Pi does not support session forking. " +
-				"The endpoint layer should fall back to createSession().",
-		);
+	async forkSession(options: CreateSessionOptions): Promise<PiSDKSession> {
+		const parent = options.context.parent;
+		if (!parent?.sessionPath || !parent?.entryId) {
+			throw new Error(
+				"Pi fork requires `sessionPath` and `entryId` on context.parent. " +
+					"The resolver should produce `fork_by_id` only when both are available; " +
+					"a launch without `entryId` should produce `resume_by_id` instead.",
+			);
+		}
+		const session = new PiSDKSession({
+			// Fork inherits the parent's conversation history via RPC; no need
+			// to inject a system prompt on top.
+			systemPrompt: null,
+			cwd: options.cwd ?? parent.cwd ?? this.config.cwd ?? process.cwd(),
+			parentSessionId: parent.sessionId ?? null,
+			piExecutablePath: this.config.piExecutablePath ?? "pi",
+			model: options.model ?? this.config.model,
+			initialRpcCommands: [
+				{ type: "switch_session", sessionPath: parent.sessionPath },
+				{ type: "fork", entryId: parent.entryId },
+			],
+		});
+		this.sessions.set(session.id, session);
+		return session;
 	}
 
-	async resumeSession(): Promise<never> {
-		throw new Error("Pi does not support session resuming.");
+	async resumeSession(sessionPath: string): Promise<PiSDKSession> {
+		// Pi's "session id" for our purposes is its JSONL file path — that's
+		// what RPC `switch_session` takes. The resolver's `resume_by_id`
+		// strategy surfaces the path as `threadId`, and the endpoint layer
+		// passes it here.
+		if (!sessionPath) {
+			throw new Error("Pi resumeSession requires a session path.");
+		}
+		const session = new PiSDKSession({
+			systemPrompt: null,
+			cwd: this.config.cwd ?? process.cwd(),
+			parentSessionId: null,
+			piExecutablePath: this.config.piExecutablePath ?? "pi",
+			model: this.config.model,
+			initialRpcCommands: [
+				{ type: "switch_session", sessionPath },
+			],
+		});
+		this.sessions.set(session.id, session);
+		return session;
+	}
+
+	async listForkCandidates(cwd: string, limit = 5): Promise<ForkCandidate[]> {
+		return listPiForkCandidates(cwd, limit);
 	}
 
 	dispose(): void {
@@ -258,12 +304,24 @@ export class PiSDKProvider implements AIProvider {
 // ---------------------------------------------------------------------------
 
 interface SessionConfig {
-	systemPrompt: string;
+	/**
+	 * System prompt injected on the first query as a prompt preamble. Set to
+	 * null for resume/fork paths — the inherited session history already
+	 * contains the relevant context, and prepending the plan/diff again
+	 * would confuse the model.
+	 */
+	systemPrompt: string | null;
 	cwd: string;
 	parentSessionId: string | null;
 	piExecutablePath: string;
 	/** Model in "provider/modelId" format, e.g. "anthropic/claude-haiku-4-5". */
 	model?: string;
+	/**
+	 * RPC commands to send immediately after the subprocess spawns, before
+	 * the first prompt. Used by fork (`switch_session` then `fork`) and
+	 * resume (`switch_session` only). Failures are fatal to the session.
+	 */
+	initialRpcCommands?: Array<Record<string, unknown>>;
 }
 
 class PiSDKSession extends BaseSession {
@@ -288,6 +346,35 @@ class PiSDKSession extends BaseSession {
 			if (!this.process || !this.process.alive) {
 				this.process = new PiProcess();
 				await this.process.spawn(this.config.piExecutablePath, this.config.cwd);
+
+				// Run init RPC commands first (switch_session / fork) so the
+				// subsequent set_model / get_state / prompt all operate against
+				// the correct session. Failures here are fatal — the caller
+				// asked to fork from a specific anchor and there's no safe
+				// way to proceed if that doesn't land.
+				if (this.config.initialRpcCommands?.length) {
+					for (const cmd of this.config.initialRpcCommands) {
+						try {
+							await this.process.sendAndWait(cmd);
+						} catch (err) {
+							const kind =
+								typeof cmd.type === "string" ? cmd.type : "rpc";
+							// Kill the subprocess so a subsequent query doesn't
+							// silently land on whatever partial state the failed
+							// init left behind (switch_session applied but fork
+							// rejected → prompts go to the wrong session). Next
+							// query re-spawns and re-attempts init.
+							this.process?.kill();
+							this.process = null;
+							yield {
+								type: "error",
+								error: `Pi ${kind} failed: ${err instanceof Error ? err.message : String(err)}`,
+								code: "pi_init_error",
+							};
+							return;
+						}
+					}
+				}
 
 				// Set model if specified (format: "provider/modelId")
 				if (this.config.model) {
@@ -428,6 +515,122 @@ class PiSDKSession extends BaseSession {
 
 import { mapPiEvent } from "./pi-events.ts";
 export { mapPiEvent } from "./pi-events.ts";
+
+// ---------------------------------------------------------------------------
+// Fork-candidate scanning — shared with pi-sdk-node.ts
+// ---------------------------------------------------------------------------
+
+/**
+ * Scan Pi's `~/.pi/agent/sessions/--{cwd-encoded}--/` directory for
+ * `.jsonl` session files matching this cwd. For each, extract the last
+ * user-message entry id (the anchor Pi's fork RPC requires).
+ *
+ * If no user entry is found, the candidate falls back to `resume`
+ * inheritance (switch-session only, no fork) which Pi's resumeSession
+ * handles by setting `initialRpcCommands: [{switch_session}]`.
+ */
+export async function listPiForkCandidates(
+	cwd: string,
+	limit = 5,
+): Promise<ForkCandidate[]> {
+	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	const fs = require("node:fs") as typeof import("node:fs");
+	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	const path = require("node:path") as typeof import("node:path");
+	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	const os = require("node:os") as typeof import("node:os");
+
+	const safePath = `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+	const sessionDir = path.join(os.homedir(), ".pi", "agent", "sessions", safePath);
+	if (!fs.existsSync(sessionDir)) return [];
+
+	let names: string[];
+	try {
+		names = fs.readdirSync(sessionDir).filter((n) => n.endsWith(".jsonl"));
+	} catch {
+		return [];
+	}
+
+	const paths = names
+		.map((n) => path.join(sessionDir, n))
+		.map((p) => {
+			try { return { p, mtime: fs.statSync(p).mtimeMs }; } catch { return null; }
+		})
+		.filter((x): x is { p: string; mtime: number } => x !== null)
+		.sort((a, b) => b.mtime - a.mtime)
+		.slice(0, limit);
+
+	const candidates: ForkCandidate[] = [];
+	for (const { p, mtime } of paths) {
+		const { sessionId, lastUserEntryId, preview } = inspectPiSessionFile(fs, p);
+		if (!sessionId) continue;
+		candidates.push({
+			id: sessionId,
+			label: "Pi session",
+			lastActiveAt: mtime,
+			preview,
+			parentFields: lastUserEntryId
+				? { sessionId, sessionPath: p, entryId: lastUserEntryId, cwd }
+				: { sessionPath: p, cwd },
+			inheritance: lastUserEntryId ? "fork" : "resume",
+		});
+	}
+	return candidates;
+}
+
+function inspectPiSessionFile(
+	fs: typeof import("node:fs"),
+	filePath: string,
+): { sessionId: string | null; lastUserEntryId: string | null; preview?: string } {
+	try {
+		const content = fs.readFileSync(filePath, "utf8");
+		const lines = content.split("\n").filter((l) => l.trim().length > 0);
+		if (lines.length === 0) return { sessionId: null, lastUserEntryId: null };
+		let sessionId: string | null = null;
+		let lastUserEntryId: string | null = null;
+		let preview: string | undefined;
+		for (const line of lines) {
+			try {
+				const entry = JSON.parse(line) as Record<string, unknown>;
+				if (!sessionId && entry.type === "session" && typeof entry.id === "string") {
+					sessionId = entry.id;
+				}
+				const msg = entry.message as { role?: string; content?: unknown } | undefined;
+				if (msg?.role === "user") {
+					if (typeof entry.id === "string") lastUserEntryId = entry.id;
+					if (typeof msg.content === "string") {
+						preview = msg.content;
+					} else if (Array.isArray(msg.content)) {
+						for (const block of msg.content) {
+							if (
+								block && typeof block === "object"
+								&& (block as { type?: string }).type === "text"
+								&& typeof (block as { text?: string }).text === "string"
+							) {
+								preview = (block as { text: string }).text;
+								break;
+							}
+						}
+					}
+				}
+			} catch {
+				/* skip malformed */
+			}
+		}
+		return {
+			sessionId,
+			lastUserEntryId,
+			preview: preview ? truncate(preview, 120) : undefined,
+		};
+	} catch {
+		return { sessionId: null, lastUserEntryId: null };
+	}
+}
+
+function truncate(s: string, max: number): string {
+	const flat = s.replace(/\s+/g, " ").trim();
+	return flat.length > max ? flat.slice(0, max - 1) + "…" : flat;
+}
 
 // ---------------------------------------------------------------------------
 // Factory registration

@@ -45,6 +45,22 @@ export interface AgentJobInfo {
     explanation: string;
     confidence: number;
   };
+  /**
+   * Accumulated formatted log output for the job. Stored in memory on the
+   * server so that a reconnecting SSE client receives the full history via
+   * the `snapshot` event instead of starting with an empty log panel.
+   *
+   * Populated incrementally by `spawnJob`'s stderr/stdout drain loops. The
+   * final snapshot includes whatever had accumulated at SSE-connect time.
+   * Capped in practice by the job's total output; no explicit bound (agent
+   * review runs produce a bounded amount of output, typically tens to low
+   * hundreds of KB).
+   *
+   * Optional so existing snapshots deserialize cleanly and the Code Tour
+   * feature branch's `engine?`/`model?` additions don't conflict with this
+   * on merge — all three fields sit side-by-side additively.
+   */
+  output?: string;
 }
 
 export interface AgentCapability {

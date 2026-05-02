@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
+import { isAdaptiveThinkingDefault } from '@plannotator/shared/claude-models';
 import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { Settings } from '@plannotator/ui/components/Settings';
@@ -361,6 +362,8 @@ const ReviewApp: React.FC = () => {
       providerId: pid,
       model: pid ? (saved.preferredModels[pid] ?? null) : null,
       reasoningEffort: null as string | null,
+      thinking: null as 'adaptive' | 'disabled' | null,
+      context: null as import('./components/AIConfigBar').SelectedContext,
     };
   });
   const [showAISetup, setShowAISetup] = useState(false);
@@ -373,7 +376,27 @@ const ReviewApp: React.FC = () => {
     providerId: aiConfig.providerId,
     model: aiConfig.model,
     reasoningEffort: aiConfig.reasoningEffort,
+    thinking: aiConfig.thinking,
+    contextParent: aiConfig.context?.parentFields ?? null,
   });
+
+  // Fetch fork candidates for the current provider. Passed to AIConfigBar
+  // which calls it lazily when the Context menu opens.
+  const fetchContextCandidates = useCallback(async () => {
+    if (!aiConfig.providerId) return [];
+    const qs = new URLSearchParams({ providerId: aiConfig.providerId });
+    try {
+      const res = await fetch(`/api/ai/fork-candidates?${qs.toString()}`);
+      if (!res.ok) return [];
+      const data = (await res.json()) as {
+        providerName?: string;
+        candidates?: import('./components/AIConfigBar').ForkCandidateSummary[];
+      };
+      return data.candidates ?? [];
+    } catch {
+      return [];
+    }
+  }, [aiConfig.providerId]);
 
   // Check AI capabilities on mount
   useEffect(() => {
@@ -393,12 +416,23 @@ const ReviewApp: React.FC = () => {
       .catch(() => { setAiCheckComplete(true); });
   }, []);
 
-  const handleAIConfigChange = useCallback((config: { providerId?: string | null; model?: string | null }) => {
+  const handleAIConfigChange = useCallback((config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null; thinking?: 'adaptive' | 'disabled' | null; context?: import('./components/AIConfigBar').SelectedContext }) => {
     setAiConfig(prev => {
       const next = { ...prev, ...config };
-      // If provider changed, load that provider's preferred model
+      // If provider changed, load that provider's preferred model and clear
+      // context (parents are provider-specific — Codex thread id means nothing
+      // to Claude).
       if (config.providerId !== undefined && config.providerId !== prev.providerId) {
         next.model = config.providerId ? getPreferredModel(config.providerId) : null;
+        next.context = null;
+      }
+      // Clear any stale thinking selection when the resulting model auto-
+      // defaults to adaptive thinking. Without this, a user who toggled
+      // Thinking Off on a pre-4.7 model carries that 'disabled' into a new
+      // 4.7+ model where the toggle is hidden — the server would silently
+      // keep thinking disabled with no UI to recover.
+      if (isAdaptiveThinkingDefault(next.model)) {
+        next.thinking = null;
       }
       // Persist provider selection
       const saved = getAIProviderSettings();
@@ -1784,7 +1818,10 @@ const ReviewApp: React.FC = () => {
             aiProviders={aiProviders}
             aiConfig={aiConfig}
             onAIConfigChange={handleAIConfigChange}
+            aiFetchContextCandidates={fetchContextCandidates}
             hasAISession={!!aiChat.sessionId}
+            aiStrategy={aiChat.strategy}
+            aiIsReconnecting={aiChat.isReconnecting}
             agentJobs={agentJobs.jobs}
             agentCapabilities={agentJobs.capabilities}
             onAgentLaunch={agentJobs.launchJob}

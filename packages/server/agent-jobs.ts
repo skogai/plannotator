@@ -9,6 +9,7 @@
  */
 
 import { formatClaudeLogEvent } from "./claude-review";
+import { startHeartbeat } from "./sse-utils";
 import {
   type AgentJobInfo,
   type AgentJobEvent,
@@ -17,8 +18,6 @@ import {
   isTerminalStatus,
   jobSource,
   serializeAgentSSEEvent,
-  AGENT_HEARTBEAT_COMMENT,
-  AGENT_HEARTBEAT_INTERVAL_MS,
 } from "@plannotator/shared/agent-jobs";
 
 export type { AgentJobInfo, AgentJobEvent, AgentCapabilities } from "@plannotator/shared/agent-jobs";
@@ -170,10 +169,30 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
       if (spawnOptions?.cwd) jobOutputPaths.set(`${id}:cwd`, spawnOptions.cwd);
       broadcast({ type: "job:started", job: { ...info } });
 
-      // Drain stderr: capture tail for error reporting + broadcast live log deltas
+      // Drain stderr: capture tail for error reporting, accumulate full log
+      // output into job.info.output for SSE snapshot re-emission, and
+      // broadcast live log deltas (batched every 200ms to reduce fanout).
       let stderrBuf = "";
       let logPending = "";
       let logFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+      // Append a chunk of log text to the job's persistent output buffer
+      // so a reconnecting client receives it in the snapshot. The broadcast
+      // delta is already sent separately via `broadcast(type: "job:log")`.
+      // Rolling ~64K-char cap so long-running jobs don't balloon memory or
+      // the snapshot payload every new SSE subscriber receives. Measured in
+      // UTF-16 code units (String.length), not bytes — adequate for JSONL
+      // logs which are dominated by ASCII.
+      const JOB_OUTPUT_MAX_CHARS = 64 * 1024;
+      const appendToJobLog = (text: string): void => {
+        const entry = jobs.get(id);
+        if (!entry) return;
+        const next = (entry.info.output ?? "") + text;
+        entry.info.output =
+          next.length > JOB_OUTPUT_MAX_CHARS
+            ? next.slice(-JOB_OUTPUT_MAX_CHARS)
+            : next;
+      };
 
       if (proc.stderr && typeof proc.stderr !== "number") {
         (async () => {
@@ -183,21 +202,29 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
               const text = typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
               stderrBuf = (stderrBuf + text).slice(-500);
               logPending += text;
+              // NOTE: don't call appendToJobLog(text) here — the broadcast
+              // happens 200ms later in the flush callback, and a subscriber
+              // connecting in that window would see the chunk in both the
+              // snapshot (via output) and the subsequent broadcast, doubling
+              // the text. Broadcast and append must happen in the same
+              // synchronous block, so both move into the flush below.
 
               if (!logFlushTimer) {
                 logFlushTimer = setTimeout(() => {
                   if (logPending) {
                     broadcast({ type: "job:log", jobId: id, delta: logPending });
+                    appendToJobLog(logPending);
                     logPending = "";
                   }
                   logFlushTimer = null;
                 }, 200);
               }
             }
-            // Flush remaining on stream close
+            // Flush remaining on stream close — same atomic pair.
             if (logFlushTimer) { clearTimeout(logFlushTimer); logFlushTimer = null; }
             if (logPending) {
               broadcast({ type: "job:log", jobId: id, delta: logPending });
+              appendToJobLog(logPending);
               logPending = "";
             }
           } catch {
@@ -224,7 +251,9 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
                   if (provider === "claude") {
                     const formatted = formatClaudeLogEvent(line);
                     if (formatted !== null) {
-                      broadcast({ type: "job:log", jobId: id, delta: formatted + '\n' });
+                      const deltaLine = formatted + '\n';
+                      broadcast({ type: "job:log", jobId: id, delta: deltaLine });
+                      appendToJobLog(deltaLine);
                     }
                     continue;
                   }
@@ -232,7 +261,9 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
                     const event = JSON.parse(line);
                     if (event.type === 'result') continue; // handled in onJobComplete
                   } catch { /* not JSON — forward as raw log */ }
-                  broadcast({ type: "job:log", jobId: id, delta: line + '\n' });
+                  const deltaLine = line + '\n';
+                  broadcast({ type: "job:log", jobId: id, delta: deltaLine });
+                  appendToJobLog(deltaLine);
                 }
               }
             } catch {
@@ -346,14 +377,17 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
       if (url.pathname === JOBS_STREAM && req.method === "GET") {
         handlerOptions?.disableIdleTimeout?.();
 
-        let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-        let ctrl: ReadableStreamDefaultController;
+        let stopHeartbeat: (() => void) | null = null;
+        let ctrl: ReadableStreamDefaultController<Uint8Array>;
 
-        const stream = new ReadableStream({
+        const stream = new ReadableStream<Uint8Array>({
           start(controller) {
             ctrl = controller;
 
-            // Send current state as snapshot
+            // Send current state as snapshot. Each job now carries its
+            // accumulated `output` field (Slice 1 PR 1 Step 8 fix) so the
+            // client's reconnecting log panel repopulates instead of
+            // starting empty.
             const snapshot: AgentJobEvent = {
               type: "snapshot",
               jobs: getAllJobs(),
@@ -362,18 +396,17 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
 
             subscribers.add(controller);
 
-            // Heartbeat to keep connection alive
-            heartbeatTimer = setInterval(() => {
-              try {
-                controller.enqueue(encoder.encode(AGENT_HEARTBEAT_COMMENT));
-              } catch {
-                if (heartbeatTimer) clearInterval(heartbeatTimer);
-                subscribers.delete(controller);
-              }
-            }, AGENT_HEARTBEAT_INTERVAL_MS);
+            // Heartbeat shared with all long-lived SSE streams via
+            // packages/server/sse-utils — 30s `: ping\n\n` comments. The
+            // onFailure callback drops the dead controller from the
+            // subscriber set when enqueue fails (client disconnected
+            // abnormally without triggering `cancel`).
+            stopHeartbeat = startHeartbeat(controller, {
+              onFailure: () => subscribers.delete(controller),
+            });
           },
           cancel() {
-            if (heartbeatTimer) clearInterval(heartbeatTimer);
+            stopHeartbeat?.();
             subscribers.delete(ctrl);
           },
         });

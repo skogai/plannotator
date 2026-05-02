@@ -16,12 +16,38 @@ export type AIContextMode = "plan-review" | "code-review" | "annotate";
 /**
  * Describes the parent agent session that originally produced the plan or diff.
  * Used to fork conversations with full history.
+ *
+ * Some providers need more than a bare session id to fork. Pi's RPC fork is
+ * path-based and requires a user-message entry id as the fork anchor, so the
+ * resolver surfaces both as optional fields here. Providers that don't use
+ * them (Claude, Codex, OpenCode) ignore them.
  */
 export interface ParentSession {
-  /** Session ID from the host agent (e.g. Claude Code session UUID). */
-  sessionId: string;
+  /**
+   * Session ID from the host agent. Required for fork paths
+   * (Claude/OpenCode/Pi). Omitted when the parent is Codex-shaped
+   * (resume-only, anchored on `threadId`) or a Pi resume fallback
+   * (no entry anchor).
+   */
+  sessionId?: string;
   /** Working directory the parent session was running in. */
-  cwd: string;
+  cwd?: string;
+  /**
+   * Pi-only. Absolute path to the session JSONL file. Used by Pi RPC
+   * `switch_session` before `fork`, and by Pi's `resumeSession` when
+   * no entry anchor is available.
+   */
+  sessionPath?: string;
+  /**
+   * Pi-only. Entry id of the user-message within the parent session's
+   * branch that we fork from. Used by Pi RPC `fork`.
+   */
+  entryId?: string;
+  /**
+   * Codex-only. Thread id used by `codex.resumeThread(threadId)`.
+   * Mutating — writes into the original Codex thread.
+   */
+  threadId?: string;
 }
 
 /**
@@ -79,75 +105,41 @@ export type AIContext =
 
 // ---------------------------------------------------------------------------
 // Messages — what streams back from the AI
+//
+// These types live in @plannotator/shared/ai-messages so that the transcript
+// accumulator (`packages/shared/chat-transcript.ts`) can reference them
+// without reaching across package boundaries. We re-export them here so
+// existing callers that import from `@plannotator/ai/types` keep working,
+// and pull them in locally for the `AISession.query` return type below.
 // ---------------------------------------------------------------------------
 
-export interface AITextMessage {
-  type: "text";
-  text: string;
-}
+import type {
+  AITextMessage,
+  AITextDeltaMessage,
+  AIThinkingDeltaMessage,
+  AIToolUseMessage,
+  AIToolResultMessage,
+  AIErrorMessage,
+  AIResultMessage,
+  AIPermissionRequestMessage,
+  AIPermissionResolvedMessage,
+  AIUnknownMessage,
+  AIMessage,
+} from "@plannotator/shared/ai-messages";
 
-export interface AITextDeltaMessage {
-  type: "text_delta";
-  delta: string;
-}
-
-export interface AIToolUseMessage {
-  type: "tool_use";
-  toolName: string;
-  toolInput: Record<string, unknown>;
-  toolUseId: string;
-}
-
-export interface AIToolResultMessage {
-  type: "tool_result";
-  toolUseId?: string;
-  result: string;
-}
-
-export interface AIErrorMessage {
-  type: "error";
-  error: string;
-  code?: string;
-}
-
-export interface AIResultMessage {
-  type: "result";
-  sessionId: string;
-  success: boolean;
-  /** The final text result (if success). */
-  result?: string;
-  /** Total cost in USD (if available). */
-  costUsd?: number;
-  /** Number of agentic turns used. */
-  turns?: number;
-}
-
-export interface AIPermissionRequestMessage {
-  type: "permission_request";
-  requestId: string;
-  toolName: string;
-  toolInput: Record<string, unknown>;
-  title?: string;
-  displayName?: string;
-  description?: string;
-  toolUseId: string;
-}
-
-export interface AIUnknownMessage {
-  type: "unknown";
-  /** The raw message from the provider, for debugging/transparency. */
-  raw: Record<string, unknown>;
-}
-
-export type AIMessage =
-  | AITextMessage
-  | AITextDeltaMessage
-  | AIToolUseMessage
-  | AIToolResultMessage
-  | AIErrorMessage
-  | AIResultMessage
-  | AIPermissionRequestMessage
-  | AIUnknownMessage;
+export type {
+  AITextMessage,
+  AITextDeltaMessage,
+  AIThinkingDeltaMessage,
+  AIToolUseMessage,
+  AIToolResultMessage,
+  AIErrorMessage,
+  AIResultMessage,
+  AIPermissionRequestMessage,
+  AIPermissionResolvedMessage,
+  AIUnknownMessage,
+  AIMessage,
+};
 
 // ---------------------------------------------------------------------------
 // Session — a live conversation with the AI
@@ -229,10 +221,32 @@ export interface CreateSessionOptions {
    */
   maxBudgetUsd?: number;
   /**
-   * Reasoning effort level (Codex only).
-   * Controls how much thinking the model does before responding.
+   * Reasoning effort level — cross-provider.
+   *   - Codex maps to `modelReasoningEffort` on the SDK thread.
+   *   - Claude maps to the `effort` query option (`low`/`medium`/`high`/`max`).
+   *     `"minimal"` and `"xhigh"` fall through unchanged where unsupported —
+   *     providers that only accept a subset should coerce at their adapter.
    */
   reasoningEffort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+  /**
+   * Extended-thinking configuration — Claude only today.
+   *   - `{ type: "adaptive" }`: Claude decides depth (the default for models
+   *     that support it — the adapter applies this automatically for
+   *     Opus 4.7+; callers only need to pass this to force adaptive on
+   *     older models that don't default to it).
+   *   - `{ type: "enabled", budgetTokens }`: fixed thinking token budget.
+   *   - `{ type: "disabled" }`: no extended thinking.
+   * Providers that don't support thinking ignore this field.
+   */
+  thinking?:
+    | { type: "adaptive" }
+    | { type: "enabled"; budgetTokens: number }
+    | { type: "disabled" };
+  /**
+   * Service tier — Codex only. "fast" enables priority processing.
+   * Kept on the cross-provider options for now; other adapters ignore it.
+   */
+  serviceTier?: "fast" | "flex" | null;
 }
 
 /**
@@ -286,10 +300,60 @@ export interface AIProvider {
   resumeSession(sessionId: string): Promise<AISession>;
 
   /**
+   * List parent sessions the user could fork/resume from in this cwd.
+   *
+   * Returned candidates are provider-specific: Claude returns local
+   * `.jsonl` sessions; Codex returns only the current CODEX_THREAD_ID
+   * (if set); OpenCode walks its session API; Pi walks its RPC session
+   * list. The client passes the chosen candidate's `parentFields` back
+   * verbatim as `CreateSessionOptions.context.parent`, so the endpoint's
+   * existing fork/resume routing takes over without new logic.
+   *
+   * Optional — providers that have no inheritance primitive (e.g. a
+   * hypothetical standalone-only provider) may omit this.
+   */
+  listForkCandidates?(cwd: string, limit?: number): Promise<ForkCandidate[]>;
+
+  /**
    * Clean up any resources held by the provider.
    * Called when the server shuts down.
    */
   dispose(): void;
+}
+
+/**
+ * A session the user could fork or resume from, surfaced in the AI config
+ * bar's Context picker. Each candidate carries display metadata plus the
+ * provider-specific `parentFields` payload that the client echoes back on
+ * session creation.
+ */
+export interface ForkCandidate {
+  /** Opaque id for client-side keying; not required to match a real session id. */
+  id: string;
+  /** Short display label (e.g., "Sonnet 4.6" or "Codex terminal thread"). */
+  label: string;
+  /** UNIX ms of last activity. Client renders as relative age. */
+  lastActiveAt: number;
+  /** Model used by this session, when known. */
+  model?: string;
+  /** Rough token count for cost-hint UX. Optional. */
+  tokenEstimate?: number;
+  /** Last user-visible text, truncated to ~120 chars. Optional. */
+  preview?: string;
+  /**
+   * Provider-specific fields for the fork/resume call. The client echoes
+   * this back under `CreateSessionOptions.context.parent` on session
+   * creation — e.g. `{ sessionId }` for Claude/OpenCode, `{ threadId }`
+   * for Codex, `{ sessionPath, entryId }` for Pi.
+   */
+  parentFields: Record<string, unknown>;
+  /**
+   * Semantics of picking this candidate:
+   *   - "fork"   → branches; original untouched (Claude/OpenCode/Pi)
+   *   - "resume" → mutates the original conversation (Codex)
+   * Client uses this to surface a warning for `resume` candidates.
+   */
+  inheritance: "fork" | "resume";
 }
 
 // ---------------------------------------------------------------------------
@@ -333,6 +397,15 @@ export interface ClaudeAgentSDKConfig extends AIProviderConfig {
    * inherits what they've already approved.
    */
   settingSources?: string[];
+  /**
+   * Optional host-provided hook for enumerating `.jsonl` session files
+   * matching a cwd. Injected from `packages/server/session-log.ts` on
+   * Bun; Pi can inject its own implementation. Keeps `packages/ai` free
+   * of filesystem concerns.
+   *
+   * When absent, the provider returns `[]` from `listForkCandidates`.
+   */
+  findSessionLogsForCwd?: (cwd: string) => string[];
 }
 
 export interface CodexSDKConfig extends AIProviderConfig {
