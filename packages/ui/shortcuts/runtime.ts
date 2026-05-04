@@ -112,6 +112,23 @@ export function createShortcutScopeHook<TScope extends ShortcutScopeDefinition<a
   };
 }
 
+// --- Multi-press shortcut support ---
+//
+// `useShortcutScope` only dispatches single-press bindings — anything with
+// whitespace (e.g. `"Alt Alt"`) or the `hold` token (e.g. `"Alt hold"`)
+// short-circuits in `matchesShortcutBinding`. Multi-press bindings need a
+// dedicated hook that knows their semantics:
+//
+//   - Double-tap → `useDoubleTapShortcuts` below.
+//   - Hold       → no shared hook yet; wire by hand in the consuming
+//                  component until one is built. The `Alt hold` binding in
+//                  `inputMethodShortcuts` is currently driven by the
+//                  bespoke `useInputMethodSwitch` hook in the plan editor.
+//
+// TODO: when the App.tsx migration starts touching hold semantics, add a
+// `useHoldShortcuts` here paired with a `parseHoldBinding` in core.ts so the
+// registry-driven path actually fires.
+
 // --- Double-tap shortcut support ---
 
 export type DoubleTapHandlers<TScope extends ShortcutScopeDefinition<any>> = Partial<

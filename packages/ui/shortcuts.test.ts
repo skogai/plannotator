@@ -93,8 +93,10 @@ describe('shortcuts', () => {
     expect(reviewSections.map(section => section.title)).toEqual([
       'Actions',
       'Search',
+      'Layout',
       'File Navigation',
       'Annotations',
+      'PR Comments',
     ]);
   });
 

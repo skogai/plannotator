@@ -56,6 +56,10 @@ const NAMED_TOKENS = new Set([
   'A-Z',
   '1-0',
   'hold',
+  // Punctuation keys used as shortcut targets. Add new ones as needed; we
+  // whitelist explicitly so typos like `Cmd` instead of `Mod` keep failing
+  // validation.
+  '.',
 ]);
 
 for (let n = 1; n <= 12; n += 1) {
