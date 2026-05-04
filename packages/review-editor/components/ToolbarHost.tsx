@@ -89,11 +89,8 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
   // window-level listener is functionally equivalent for that purpose.
   const handleMouseMove = toolbar.handleMouseMove;
   useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      handleMouseMove({ clientX: e.clientX, clientY: e.clientY } as unknown as React.MouseEvent);
-    };
-    window.addEventListener('mousemove', onMove);
-    return () => window.removeEventListener('mousemove', onMove);
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
   }, [handleMouseMove]);
 
   useImperativeHandle(
