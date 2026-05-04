@@ -5,23 +5,19 @@ export const reviewSuggestionModalShortcuts = defineShortcutScope({
   id: 'review-suggestion-modal',
   title: 'Suggestion Editor',
   shortcuts: {
-    submit: {
-      description: 'Submit suggestion',
-      bindings: ['Mod+Enter'],
-      section: 'Suggestion Editor',
-      displayOrder: 10,
-    },
     indent: {
       description: 'Indent (insert spaces)',
       bindings: ['Tab'],
       section: 'Suggestion Editor',
-      displayOrder: 20,
+      hint: 'Available in the expanded suggestion editor.',
+      displayOrder: 10,
     },
-    cancel: {
+    close: {
       description: 'Close suggestion editor',
       bindings: ['Escape'],
       section: 'Suggestion Editor',
-      displayOrder: 30,
+      hint: 'Closes the modal; suggestion text is preserved on the underlying comment.',
+      displayOrder: 20,
     },
   },
 });
