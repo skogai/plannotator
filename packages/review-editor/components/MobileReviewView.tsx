@@ -182,6 +182,57 @@ const FileCard: React.FC<FileCardProps> = ({
     [selection, fileIdx],
   );
 
+  // Split annotations into file-scoped (rendered above the diff) and
+  // line-scoped (rendered inline below their last line). The latter is
+  // keyed by `${side}:${lineEnd}` for fast lookup while walking lines.
+  const { fileScopedAnnotations, annotationsEndingAt, isLineAnnotated } = useMemo(() => {
+    const fileScoped: CodeAnnotation[] = [];
+    const endMap = new Map<string, CodeAnnotation[]>();
+    const inRange = (side: 'old' | 'new', num: number) =>
+      fileAnnotations.some(
+        ann => ann.scope !== 'file' && ann.side === side && num >= ann.lineStart && num <= ann.lineEnd,
+      );
+    for (const ann of fileAnnotations) {
+      if (ann.scope === 'file') {
+        fileScoped.push(ann);
+        continue;
+      }
+      const key = `${ann.side}:${ann.lineEnd}`;
+      const existing = endMap.get(key);
+      if (existing) existing.push(ann);
+      else endMap.set(key, [ann]);
+    }
+    return {
+      fileScopedAnnotations: fileScoped,
+      annotationsEndingAt: endMap,
+      isLineAnnotated: inRange,
+    };
+  }, [fileAnnotations]);
+
+  // Walk the diff lines and split them into "chunks": runs of consecutive
+  // lines that share a single horizontally-scrollable container, broken
+  // wherever an annotation needs to be inserted. Each break carries the
+  // annotation cards that should appear after the last line of the chunk.
+  const chunks = useMemo(() => {
+    const result: { lines: DiffLine[]; cards: CodeAnnotation[] }[] = [];
+    let current: DiffLine[] = [];
+    for (const line of lines) {
+      current.push(line);
+      const side: 'old' | 'new' | null =
+        line.kind === 'add' ? 'new' : line.kind === 'del' ? 'old' : null;
+      const lineNum = line.kind === 'add' ? line.newNum : line.kind === 'del' ? line.oldNum : undefined;
+      if (side && lineNum != null) {
+        const cards = annotationsEndingAt.get(`${side}:${lineNum}`);
+        if (cards && cards.length) {
+          result.push({ lines: current, cards });
+          current = [];
+        }
+      }
+    }
+    if (current.length) result.push({ lines: current, cards: [] });
+    return result;
+  }, [lines, annotationsEndingAt]);
+
   return (
     <section className="border border-border/60 rounded-lg bg-card overflow-hidden">
       <button
@@ -219,56 +270,80 @@ const FileCard: React.FC<FileCardProps> = ({
 
       {isOpen && (
         <div className="border-t border-border/40">
-          <div className="overflow-x-auto">
-            <pre className="text-[11px] leading-relaxed font-mono py-1 min-w-fit">
-              {lines.map((line, i) => {
-                const tappable = line.kind === 'add' || line.kind === 'del';
-                const side: 'old' | 'new' | null = line.kind === 'add' ? 'new' : line.kind === 'del' ? 'old' : null;
-                const lineNum = line.kind === 'add' ? line.newNum : line.kind === 'del' ? line.oldNum : undefined;
-                const selected = side ? isLineSelected(side, lineNum) : false;
-                const Inner = (
-                  <>
-                    <span className="select-none w-8 flex-shrink-0 text-right pr-2 opacity-50 text-[10px] tabular-nums">
-                      {line.kind === 'add' && line.newNum ? line.newNum : line.kind === 'del' && line.oldNum ? line.oldNum : ''}
-                    </span>
-                    <span className="select-none w-3 flex-shrink-0 opacity-60">{linePrefix[line.kind]}</span>
-                    <span className="select-none whitespace-pre flex-1">{line.text || ' '}</span>
-                  </>
-                );
-                if (tappable && side && lineNum != null) {
-                  return (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => onTapLine(fileIdx, side, lineNum)}
-                      style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none', touchAction: 'manipulation' } as React.CSSProperties}
-                      className={`select-none flex w-full text-left px-1 py-0.5 border-l-2 ${lineClass[line.kind]} ${
-                        selected ? 'border-primary ring-1 ring-primary bg-primary/5' : 'border-transparent'
-                      } active:opacity-60`}
-                    >
-                      {Inner}
-                    </button>
-                  );
-                }
-                return (
-                  <div key={i} className={`flex px-1 border-l-2 border-transparent ${lineClass[line.kind]}`}>
-                    {Inner}
-                  </div>
-                );
-              })}
-            </pre>
-          </div>
-
-          {fileAnnotations.length > 0 && (
-            <div className="border-t border-border/40 p-3 space-y-2 bg-muted/20">
+          {fileScopedAnnotations.length > 0 && (
+            <div className="border-b border-border/40 p-3 space-y-2 bg-muted/20">
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                Annotations
+                File-level comments
               </div>
-              {fileAnnotations.map(ann => (
+              {fileScopedAnnotations.map(ann => (
                 <AnnotationCard key={ann.id} annotation={ann} onDelete={onDeleteAnnotation} />
               ))}
             </div>
           )}
+          {chunks.map((chunk, ci) => (
+            <React.Fragment key={ci}>
+              <div className="overflow-x-auto">
+                <div className="text-[11px] leading-relaxed font-mono py-1 min-w-fit">
+                  {chunk.lines.map((line, i) => {
+                    const tappable = line.kind === 'add' || line.kind === 'del';
+                    const side: 'old' | 'new' | null = line.kind === 'add' ? 'new' : line.kind === 'del' ? 'old' : null;
+                    const lineNum = line.kind === 'add' ? line.newNum : line.kind === 'del' ? line.oldNum : undefined;
+                    const selected = side ? isLineSelected(side, lineNum) : false;
+                    const annotated = side && lineNum != null ? isLineAnnotated(side, lineNum) : false;
+                    const Inner = (
+                      <>
+                        <span className="select-none w-8 flex-shrink-0 text-right pr-2 opacity-50 text-[10px] tabular-nums">
+                          {line.kind === 'add' && line.newNum ? line.newNum : line.kind === 'del' && line.oldNum ? line.oldNum : ''}
+                        </span>
+                        <span className="select-none w-3 flex-shrink-0 opacity-60">{linePrefix[line.kind]}</span>
+                        <span className="select-none whitespace-pre flex-1">{line.text || ' '}</span>
+                        {annotated && (
+                          <span className="select-none flex-shrink-0 ml-1 text-amber-600 dark:text-amber-400" aria-label="Has annotation">
+                            <svg className="w-3 h-3 inline" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M4 4h16a2 2 0 012 2v10a2 2 0 01-2 2h-7l-5 4v-4H4a2 2 0 01-2-2V6a2 2 0 012-2z" />
+                            </svg>
+                          </span>
+                        )}
+                      </>
+                    );
+                    // Selection ring takes precedence over annotation highlight
+                    // for the active selection target; annotation tint shows
+                    // through on non-selected annotated lines.
+                    const borderClass = selected
+                      ? 'border-primary ring-1 ring-primary bg-primary/5'
+                      : annotated
+                        ? 'border-amber-500/70 bg-amber-500/[0.06]'
+                        : 'border-transparent';
+                    if (tappable && side && lineNum != null) {
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => onTapLine(fileIdx, side, lineNum)}
+                          style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none', touchAction: 'manipulation' } as React.CSSProperties}
+                          className={`select-none flex w-full text-left px-1 py-0.5 border-l-2 ${lineClass[line.kind]} ${borderClass} active:opacity-60`}
+                        >
+                          {Inner}
+                        </button>
+                      );
+                    }
+                    return (
+                      <div key={i} className={`flex px-1 border-l-2 border-transparent ${lineClass[line.kind]}`}>
+                        {Inner}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              {chunk.cards.length > 0 && (
+                <div className="px-3 py-2.5 space-y-2 bg-amber-500/5 border-y border-amber-500/20">
+                  {chunk.cards.map(ann => (
+                    <AnnotationCard key={ann.id} annotation={ann} onDelete={onDeleteAnnotation} />
+                  ))}
+                </div>
+              )}
+            </React.Fragment>
+          ))}
         </div>
       )}
     </section>
