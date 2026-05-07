@@ -911,6 +911,34 @@ const ReviewApp: React.FC = () => {
     setAnnotations(prev => [...prev, withPRContext(newAnnotation)]);
   }, [identity, withPRContext]);
 
+  // Mobile path: build a line-scoped annotation directly from explicit
+  // (filePath, side, lineStart, lineEnd, type, text) rather than via the
+  // desktop `pendingSelection` state. Same factory + setAnnotations pipe,
+  // so drafts/sidebar/exports see it identically.
+  const handleAddMobileAnnotation = useCallback((
+    filePath: string,
+    side: 'old' | 'new',
+    lineStart: number,
+    lineEnd: number,
+    type: CodeAnnotationType,
+    text: string,
+  ) => {
+    const trimmed = text.trim();
+    const newAnnotation: CodeAnnotation = {
+      id: generateId(),
+      type,
+      scope: 'line',
+      filePath,
+      lineStart: Math.min(lineStart, lineEnd),
+      lineEnd: Math.max(lineStart, lineEnd),
+      side,
+      text: trimmed || undefined,
+      createdAt: Date.now(),
+      author: identity,
+    };
+    setAnnotations(prev => [...prev, withPRContext(newAnnotation)]);
+  }, [identity, withPRContext]);
+
   // Edit annotation
   const handleEditAnnotation = useCallback((
     id: string,
@@ -1712,13 +1740,34 @@ const ReviewApp: React.FC = () => {
           annotations={allAnnotations}
           prMetadata={prMetadata}
           repoInfo={repoInfo}
-          onExit={handleExit}
+          origin={origin}
+          gitUser={gitUser}
+          aiProviders={aiProviders}
+          totalAnnotationCount={totalAnnotationCount}
           isExiting={isExiting}
+          isSendingFeedback={isSendingFeedback}
+          isApproving={isApproving}
+          onExit={handleExit}
+          onSendFeedback={handleSendFeedback}
+          onApprove={handleApprove}
+          onAddAnnotation={handleAddMobileAnnotation}
+          onDeleteAnnotation={handleDeleteAnnotation}
+          onIdentityChange={handleIdentityChange}
         />
         <CompletionOverlay
-          submitted={submitted === 'exited' ? 'exited' : false}
-          title="Session Closed"
-          subtitle="Review session closed."
+          submitted={submitted}
+          title={
+            submitted === 'approved' ? 'Changes Approved'
+            : submitted === 'exited' ? 'Session Closed'
+            : 'Feedback Sent'
+          }
+          subtitle={
+            submitted === 'exited'
+              ? 'Review session closed without feedback.'
+              : submitted === 'approved'
+                ? `${getAgentName(origin)} will proceed with the changes.`
+                : `${getAgentName(origin)} will address your review feedback.`
+          }
           agentLabel={getAgentName(origin)}
         />
       </ThemeProvider>
