@@ -1968,6 +1968,7 @@ const App: React.FC = () => {
                     onAddGlobalAttachment={handleAddGlobalAttachment}
                     onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
                     sourceInfo={sourceInfo}
+                    maxWidth={annotateReaderMaxWidth}
                   />
                 ) : (
                   <Viewer

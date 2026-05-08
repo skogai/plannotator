@@ -12,6 +12,7 @@ import type { Annotation, EditorMode, ImageAttachment } from "../../types";
 import { AnnotationType } from "../../types";
 import { getIdentity } from "../../utils/identity";
 import { AnnotationToolbar } from "../AnnotationToolbar";
+import { AttachmentsButton } from "../AttachmentsButton";
 import { CommentPopover } from "../CommentPopover";
 import { FloatingQuickLabelPicker } from "../FloatingQuickLabelPicker";
 import type { ViewerHandle } from "../Viewer";
@@ -74,6 +75,7 @@ export interface HtmlViewerProps {
   onAddGlobalAttachment?: (image: ImageAttachment) => void;
   onRemoveGlobalAttachment?: (path: string) => void;
   sourceInfo?: string;
+  maxWidth?: number | null;
 }
 
 export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
@@ -85,12 +87,21 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onSelectAnnotation,
       selectedAnnotationId,
       mode,
+      globalAttachments = [],
+      onAddGlobalAttachment,
+      onRemoveGlobalAttachment,
+      maxWidth,
     },
     ref,
   ) => {
     const iframeRef = useRef<HTMLIFrameElement>(null);
+    const globalCommentButtonRef = useRef<HTMLButtonElement>(null);
     const [iframeHeight, setIframeHeight] = useState(600);
     const [iframeReady, setIframeReady] = useState(false);
+    const [globalCommentPopover, setGlobalCommentPopover] = useState<{
+      anchorEl: HTMLElement;
+      contextText: string;
+    } | null>(null);
 
     const srcdoc = useMemo(() => {
       const tokens = readThemeTokens();
@@ -164,38 +175,64 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       applySharedAnnotations: hook.applyAnnotations,
     }));
 
-    const handleGlobalComment = useCallback(() => {
-      onAddAnnotation({
-        id: `html-ann-${Date.now()}`,
-        blockId: "",
-        startOffset: 0,
-        endOffset: 0,
-        type: AnnotationType.GLOBAL_COMMENT,
-        text: "",
-        originalText: "",
-        author: getIdentity(),
-        createdA: Date.now(),
-      });
-    }, [onAddAnnotation]);
+    const handleGlobalCommentSubmit = useCallback(
+      (text: string, images?: ImageAttachment[]) => {
+        onAddAnnotation({
+          id: `global-${Date.now()}`,
+          blockId: "",
+          startOffset: 0,
+          endOffset: 0,
+          type: AnnotationType.GLOBAL_COMMENT,
+          text: text.trim(),
+          originalText: "",
+          author: getIdentity(),
+          createdA: Date.now(),
+          images,
+        });
+        setGlobalCommentPopover(null);
+      },
+      [onAddAnnotation],
+    );
 
     return (
       <>
-        <article
-          data-print-region="article"
-          className="relative bg-card rounded-xl shadow-xl overflow-hidden"
+        <div
+          className="relative w-full"
+          style={{ maxWidth: maxWidth ?? undefined }}
         >
-          {/* Global comment action bar */}
-          <div className="flex items-center justify-end gap-2 px-4 py-2 border-b border-border/50">
+          {/* Action bar — positioned above the iframe, outside overflow:hidden */}
+          <div data-print-hide className="flex justify-end gap-1 md:gap-2 mb-2">
+            {onAddGlobalAttachment && onRemoveGlobalAttachment && (
+              <AttachmentsButton
+                images={globalAttachments}
+                onAdd={onAddGlobalAttachment}
+                onRemove={onRemoveGlobalAttachment}
+                variant="toolbar"
+              />
+            )}
             <button
-              type="button"
-              onClick={handleGlobalComment}
-              className="text-xs font-mono text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              ref={globalCommentButtonRef}
+              onClick={() => {
+                setGlobalCommentPopover({
+                  anchorEl: globalCommentButtonRef.current!,
+                  contextText: "",
+                });
+              }}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors cursor-pointer"
+              title="Add global comment"
             >
-              + Global Comment
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 011.037-.443 48.282 48.282 0 005.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+              </svg>
+              <span>Comment</span>
             </button>
           </div>
 
-          <iframe
+          <article
+            data-print-region="article"
+            className="relative bg-card rounded-xl shadow-xl overflow-hidden w-full"
+          >
+            <iframe
             ref={iframeRef}
             srcDoc={srcdoc}
             sandbox="allow-scripts allow-same-origin"
@@ -208,14 +245,16 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             }}
             title="HTML Plan Viewer"
           />
-        </article>
+          </article>
+        </div>
 
         {/* Toolbar portal */}
         {hook.toolbarState &&
           createPortal(
             <AnnotationToolbar
-              mode="center-above"
-              anchorEl={hook.toolbarState.element}
+              positionMode="center-above"
+              element={hook.toolbarState.element}
+              copyText={hook.toolbarState.selectionText}
               onAnnotate={hook.handleAnnotate}
               onRequestComment={hook.handleRequestComment}
               onQuickLabel={hook.handleQuickLabel}
@@ -231,6 +270,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               anchorEl={hook.commentPopover.anchorEl}
               contextText={hook.commentPopover.contextText}
               initialText={hook.commentPopover.initialText}
+              isGlobal={false}
               onSubmit={hook.handleCommentSubmit}
               onClose={hook.handleCommentClose}
             />,
@@ -245,6 +285,19 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               cursorHint={hook.quickLabelPicker.cursorHint}
               onSelect={hook.handleFloatingQuickLabel}
               onDismiss={hook.handleQuickLabelPickerDismiss}
+            />,
+            document.body,
+          )}
+
+        {/* Global comment popover portal */}
+        {globalCommentPopover &&
+          createPortal(
+            <CommentPopover
+              anchorEl={globalCommentPopover.anchorEl}
+              contextText={globalCommentPopover.contextText}
+              isGlobal={true}
+              onSubmit={handleGlobalCommentSubmit}
+              onClose={() => setGlobalCommentPopover(null)}
             />,
             document.body,
           )}
