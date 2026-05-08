@@ -56,6 +56,10 @@ export interface AnnotateServerOptions {
   sourceConverted?: boolean;
   /** Enable review-gate UX: adds an Approve button alongside Close/Send Annotations (#570) */
   gate?: boolean;
+  /** Raw HTML content for direct iframe rendering (--render-html mode) */
+  rawHtml?: string;
+  /** Render HTML as-is in an iframe instead of converting to markdown */
+  renderHtml?: boolean;
   /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void;
 }
@@ -110,6 +114,8 @@ export async function startAnnotateServer(
     shareBaseUrl,
     pasteApiUrl,
     gate = false,
+    rawHtml,
+    renderHtml = false,
     onReady,
   } = options;
 
@@ -165,6 +171,8 @@ export async function startAnnotateServer(
               sourceInfo,
               sourceConverted: sourceConverted ?? false,
               gate,
+              renderAs: renderHtml ? 'html' as const : 'markdown' as const,
+              ...(renderHtml && rawHtml ? { rawHtml } : {}),
               sharingEnabled,
               shareBaseUrl,
               pasteApiUrl,

@@ -47,6 +47,8 @@ export async function startAnnotateServer(options: {
 	sourceInfo?: string;
 	sourceConverted?: boolean;
 	gate?: boolean;
+	rawHtml?: string;
+	renderHtml?: boolean;
 }): Promise<AnnotateServerResult> {
 	// Side-channel pre-warm so /api/doc/exists POSTs land on warm cache.
 	void warmFileListCache(process.cwd(), "code");
@@ -99,6 +101,8 @@ export async function startAnnotateServer(options: {
 				sourceInfo: options.sourceInfo,
 				sourceConverted: options.sourceConverted ?? false,
 				gate: options.gate ?? false,
+				renderAs: options.renderHtml ? 'html' : 'markdown',
+				...(options.renderHtml && options.rawHtml ? { rawHtml: options.rawHtml } : {}),
 				sharingEnabled,
 				shareBaseUrl,
 				pasteApiUrl,

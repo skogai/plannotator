@@ -54,22 +54,22 @@ describe("install.sh", () => {
 
   test("installs skills via git sparse-checkout", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
-    expect(script).toContain("git sparse-checkout set apps/skills");
+    expect(script).toContain("git sparse-checkout set skills");
     expect(script).toContain("CLAUDE_SKILLS_DIR");
     expect(script).toContain("CODEX_SKILLS_DIR");
     expect(script).toContain("AGENTS_SKILLS_DIR");
     expect(script).toContain("$HOME/.codex/skills");
     expect(script).toContain("$HOME/.agents/skills");
     expect(script).toContain("copy_skill_if_present");
-    expect(script).toContain('copy_skill_if_present apps/skills/plannotator-review "$CODEX_SKILLS_DIR"');
-    expect(script).toContain('copy_skill_if_present apps/skills/plannotator-annotate "$CODEX_SKILLS_DIR"');
-    expect(script).toContain('copy_skill_if_present apps/skills/plannotator-last "$CODEX_SKILLS_DIR"');
-    expect(script).toContain('copy_skill_if_present apps/skills/plannotator-compound "$AGENTS_SKILLS_DIR"');
-    expect(script).toContain('copy_skill_if_present apps/skills/plannotator-setup-goal "$AGENTS_SKILLS_DIR"');
+    expect(script).toContain('copy_skill_if_present skills/plannotator-review "$CODEX_SKILLS_DIR"');
+    expect(script).toContain('copy_skill_if_present skills/plannotator-annotate "$CODEX_SKILLS_DIR"');
+    expect(script).toContain('copy_skill_if_present skills/plannotator-last "$CODEX_SKILLS_DIR"');
+    expect(script).toContain('copy_skill_if_present skills/plannotator-compound "$AGENTS_SKILLS_DIR"');
+    expect(script).toContain('copy_skill_if_present skills/plannotator-setup-goal "$AGENTS_SKILLS_DIR"');
     expect(script).toContain('if [ "$codex_available" -eq 1 ]; then');
-    expect(script).not.toContain('cp -r apps/skills/* "$CODEX_SKILLS_DIR/"');
-    expect(script).not.toContain('cp -r apps/skills/* "$AGENTS_SKILLS_DIR/"');
-    expect(script).not.toContain('cp -r apps/skills/plannotator-review "$CODEX_SKILLS_DIR/"');
+    expect(script).not.toContain('cp -r skills/* "$CODEX_SKILLS_DIR/"');
+    expect(script).not.toContain('cp -r skills/* "$AGENTS_SKILLS_DIR/"');
+    expect(script).not.toContain('cp -r skills/plannotator-review "$CODEX_SKILLS_DIR/"');
     expect(script).toContain('Skipping skills install (git not found)');
   });
 
@@ -193,22 +193,22 @@ describe("install.ps1", () => {
 
   test("installs skills via git sparse-checkout", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
-    expect(script).toContain("git sparse-checkout set apps/skills");
+    expect(script).toContain("git sparse-checkout set skills");
     expect(script).toContain("claudeSkillsDir");
     expect(script).toContain("codexSkillsDir");
     expect(script).toContain("agentsSkillsDir");
     expect(script).toContain("$env:USERPROFILE\\.codex\\skills");
     expect(script).toContain("$env:USERPROFILE\\.agents\\skills");
     expect(script).toContain("Copy-SkillIfPresent");
-    expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\plannotator-review" $codexSkillsDir');
-    expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\plannotator-annotate" $codexSkillsDir');
-    expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\plannotator-last" $codexSkillsDir');
-    expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\plannotator-compound" $agentsSkillsDir');
-    expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\plannotator-setup-goal" $agentsSkillsDir');
+    expect(script).toContain('Copy-SkillIfPresent "skills\\plannotator-review" $codexSkillsDir');
+    expect(script).toContain('Copy-SkillIfPresent "skills\\plannotator-annotate" $codexSkillsDir');
+    expect(script).toContain('Copy-SkillIfPresent "skills\\plannotator-last" $codexSkillsDir');
+    expect(script).toContain('Copy-SkillIfPresent "skills\\plannotator-compound" $agentsSkillsDir');
+    expect(script).toContain('Copy-SkillIfPresent "skills\\plannotator-setup-goal" $agentsSkillsDir');
     expect(script).toContain("if ($codexAvailable)");
-    expect(script).not.toContain('Copy-Item -Recurse -Force "apps\\skills\\*" $codexSkillsDir');
-    expect(script).not.toContain('Copy-Item -Recurse -Force "apps\\skills\\*" $agentsSkillsDir');
-    expect(script).not.toContain('Copy-Item -Recurse -Force "apps\\skills\\plannotator-review" $codexSkillsDir');
+    expect(script).not.toContain('Copy-Item -Recurse -Force "skills\\*" $codexSkillsDir');
+    expect(script).not.toContain('Copy-Item -Recurse -Force "skills\\*" $agentsSkillsDir');
+    expect(script).not.toContain('Copy-Item -Recurse -Force "skills\\plannotator-review" $codexSkillsDir');
     expect(script).toContain('Skipping skills install (git not found)');
   });
 
@@ -304,20 +304,20 @@ describe("install.cmd", () => {
 
   test("installs skills via git sparse-checkout", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
-    expect(script).toContain("git sparse-checkout set apps/skills");
+    expect(script).toContain("git sparse-checkout set skills");
     expect(script).toContain("CLAUDE_SKILLS_DIR");
     expect(script).toContain("CODEX_SKILLS_DIR");
     expect(script).toContain("AGENTS_SKILLS_DIR");
     expect(script).toContain("%USERPROFILE%\\.codex\\skills");
     expect(script).toContain("%USERPROFILE%\\.agents\\skills");
     expect(script).toContain('if "!CODEX_AVAILABLE!"=="1"');
-    expect(script).toContain('if exist "apps\\skills\\plannotator-review" xcopy /s /i /y /q "apps\\skills\\plannotator-review" "!CODEX_SKILLS_DIR!\\plannotator-review\\"');
-    expect(script).toContain('if exist "apps\\skills\\plannotator-annotate" xcopy /s /i /y /q "apps\\skills\\plannotator-annotate" "!CODEX_SKILLS_DIR!\\plannotator-annotate\\"');
-    expect(script).toContain('if exist "apps\\skills\\plannotator-last" xcopy /s /i /y /q "apps\\skills\\plannotator-last" "!CODEX_SKILLS_DIR!\\plannotator-last\\"');
-    expect(script).toContain('if exist "apps\\skills\\plannotator-compound" xcopy /s /i /y /q "apps\\skills\\plannotator-compound" "!AGENTS_SKILLS_DIR!\\plannotator-compound\\"');
-    expect(script).toContain('if exist "apps\\skills\\plannotator-setup-goal" xcopy /s /i /y /q "apps\\skills\\plannotator-setup-goal" "!AGENTS_SKILLS_DIR!\\plannotator-setup-goal\\"');
-    expect(script).not.toContain('xcopy /s /y /q "apps\\skills\\*" "!CODEX_SKILLS_DIR!\\"');
-    expect(script).not.toContain('xcopy /s /y /q "apps\\skills\\*" "!AGENTS_SKILLS_DIR!\\"');
+    expect(script).toContain('if exist "skills\\plannotator-review" xcopy /s /i /y /q "skills\\plannotator-review" "!CODEX_SKILLS_DIR!\\plannotator-review\\"');
+    expect(script).toContain('if exist "skills\\plannotator-annotate" xcopy /s /i /y /q "skills\\plannotator-annotate" "!CODEX_SKILLS_DIR!\\plannotator-annotate\\"');
+    expect(script).toContain('if exist "skills\\plannotator-last" xcopy /s /i /y /q "skills\\plannotator-last" "!CODEX_SKILLS_DIR!\\plannotator-last\\"');
+    expect(script).toContain('if exist "skills\\plannotator-compound" xcopy /s /i /y /q "skills\\plannotator-compound" "!AGENTS_SKILLS_DIR!\\plannotator-compound\\"');
+    expect(script).toContain('if exist "skills\\plannotator-setup-goal" xcopy /s /i /y /q "skills\\plannotator-setup-goal" "!AGENTS_SKILLS_DIR!\\plannotator-setup-goal\\"');
+    expect(script).not.toContain('xcopy /s /y /q "skills\\*" "!CODEX_SKILLS_DIR!\\"');
+    expect(script).not.toContain('xcopy /s /y /q "skills\\*" "!AGENTS_SKILLS_DIR!\\"');
     expect(script).toContain("Skipping skills install");
   });
 
@@ -396,7 +396,7 @@ describe("install.cmd", () => {
 describe("Codex Plannotator skills", () => {
   test("command-overlap skills include OpenAI agent config", () => {
     for (const skill of ["plannotator-review", "plannotator-annotate", "plannotator-last"]) {
-      const configPath = join(scriptsDir, "..", "apps", "skills", skill, "agents", "openai.yaml");
+      const configPath = join(scriptsDir, "..", "skills", skill, "agents", "openai.yaml");
       expect(existsSync(configPath)).toBe(true);
     }
   });

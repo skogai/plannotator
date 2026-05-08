@@ -95,7 +95,7 @@ jobs:
         #   - plannotator-win32-x64.exe attached
         #   - plannotator-win32-x64.exe.sha256 attached
         #   - the install.cmd and packages/shared/ layout your branch
-        #     under test expects to find in apps/skills/
+        #     under test expects to find in skills/
         # A missing or mismatched release asset surfaces as a curl 404
         # in this step with no obvious connection to the test's purpose.
         run: scripts\install.cmd v0.17.1 --skip-attestation

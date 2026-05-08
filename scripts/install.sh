@@ -779,18 +779,18 @@ if command -v git &>/dev/null; then
         git clone --depth 1 --filter=blob:none --sparse \
             "https://github.com/${REPO}.git" --branch "$latest_tag" repo 2>/dev/null
         cd repo
-        git sparse-checkout set apps/skills 2>/dev/null
-        [ -d "apps/skills" ]
-        [ "$(ls -A apps/skills 2>/dev/null)" ]
+        git sparse-checkout set skills 2>/dev/null
+        [ -d "skills" ]
+        [ "$(ls -A skills 2>/dev/null)" ]
         mkdir -p "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR"
-        cp -r apps/skills/* "$CLAUDE_SKILLS_DIR/"
-        copy_skill_if_present apps/skills/plannotator-compound "$AGENTS_SKILLS_DIR"
-        copy_skill_if_present apps/skills/plannotator-setup-goal "$AGENTS_SKILLS_DIR"
+        cp -r skills/* "$CLAUDE_SKILLS_DIR/"
+        copy_skill_if_present skills/plannotator-compound "$AGENTS_SKILLS_DIR"
+        copy_skill_if_present skills/plannotator-setup-goal "$AGENTS_SKILLS_DIR"
         if [ "$codex_available" -eq 1 ]; then
             mkdir -p "$CODEX_SKILLS_DIR"
-            copy_skill_if_present apps/skills/plannotator-review "$CODEX_SKILLS_DIR"
-            copy_skill_if_present apps/skills/plannotator-annotate "$CODEX_SKILLS_DIR"
-            copy_skill_if_present apps/skills/plannotator-last "$CODEX_SKILLS_DIR"
+            copy_skill_if_present skills/plannotator-review "$CODEX_SKILLS_DIR"
+            copy_skill_if_present skills/plannotator-annotate "$CODEX_SKILLS_DIR"
+            copy_skill_if_present skills/plannotator-last "$CODEX_SKILLS_DIR"
         fi
     ); then
         if [ "$codex_available" -eq 1 ]; then
@@ -799,7 +799,7 @@ if command -v git &>/dev/null; then
             echo "Installed skills to ${CLAUDE_SKILLS_DIR}/ and shared agent skills to ${AGENTS_SKILLS_DIR}/"
         fi
     else
-        echo "Skipping skills install (git sparse-checkout failed or apps/skills empty)"
+        echo "Skipping skills install (git sparse-checkout failed or skills empty)"
     fi
 
     rm -rf "$skills_tmp"

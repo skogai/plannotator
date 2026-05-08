@@ -2,6 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallba
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
 import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry } from '@plannotator/ui/utils/parser';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
+import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { ExportModal } from '@plannotator/ui/components/ExportModal';
 import { ImportModal } from '@plannotator/ui/components/ImportModal';
@@ -157,6 +158,8 @@ const App: React.FC = () => {
   const [annotateSource, setAnnotateSource] = useState<'file' | 'message' | 'folder' | null>(null);
   const [sourceInfo, setSourceInfo] = useState<string | undefined>();
   const [sourceConverted, setSourceConverted] = useState(false);
+  const [renderAs, setRenderAs] = useState<'markdown' | 'html'>('markdown');
+  const [rawHtml, setRawHtml] = useState('');
   const [sourceFilePath, setSourceFilePath] = useState<string | undefined>();
   const [imageBaseDir, setImageBaseDir] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
@@ -711,7 +714,7 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive'; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; gate?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string } }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive'; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string } }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         // gitUser drives the "Use git name" button in Settings; stays undefined (button hidden) when unavailable
@@ -723,6 +726,10 @@ const App: React.FC = () => {
           archive.fetchPlans();
           setSharingEnabled(false);
           sidebar.open('archive');
+        } else if (data.renderAs === 'html' && data.rawHtml) {
+          setRenderAs('html');
+          setRawHtml(data.rawHtml);
+          setMarkdown('');
         } else if (data.mode === 'annotate-folder') {
           // Folder annotation mode: clear demo content, let user pick a file
           setMarkdown('');
@@ -1948,42 +1955,58 @@ const App: React.FC = () => {
                     </div>
                   </div>
                 )}
-                <Viewer
-                  key={linkedDocHook.isActive ? `doc:${linkedDocHook.filepath}` : 'plan'}
-                  ref={viewerRef}
-                  blocks={blocks}
-                  markdown={markdown}
-                  frontmatter={frontmatter}
-                  annotations={viewerAnnotations}
-                  onAddAnnotation={handleAddAnnotation}
-                  onSelectAnnotation={handleSelectAnnotation}
-                  selectedAnnotationId={selectedAnnotationId}
-                  mode={editorMode}
-                  inputMethod={inputMethod}
-                  taterMode={taterMode}
-                  globalAttachments={globalAttachments}
-                  onAddGlobalAttachment={handleAddGlobalAttachment}
-                  onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
-                  repoInfo={repoInfo}
-                  stickyActions={uiPrefs.stickyActionsEnabled}
-                  planDiffStats={linkedDocHook.isActive ? null : planDiff.diffStats}
-                  isPlanDiffActive={isPlanDiffActive}
-                  onPlanDiffToggle={() => setIsPlanDiffActive(!isPlanDiffActive)}
-                  hasPreviousVersion={!linkedDocHook.isActive && planDiff.hasPreviousVersion}
-                  showDemoBadge={!isApiMode && !isLoadingShared && !isSharedSession}
-                  maxWidth={annotateReaderMaxWidth}
-                  onOpenLinkedDoc={handleOpenLinkedDoc}
-                  onOpenCodeFile={codeFilePopout.open}
-                  linkedDocInfo={linkedDocHook.isActive ? { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label: fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath)?.isVault ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined, backLabel } : null}
-                  imageBaseDir={imageBaseDir}
-                  codePathBaseDir={activeDocBaseDir}
-                  copyLabel={annotateSource === 'message' ? 'Copy message' : annotateSource === 'file' || annotateSource === 'folder' ? 'Copy file' : undefined}
-                  archiveInfo={archive.currentInfo}
-                  sourceInfo={sourceInfo}
-                  onToggleCheckbox={checkbox.toggle}
-                  checkboxOverrides={checkbox.overrides}
-                  actionsLabelMode={actionsLabelMode}
-                />
+                {renderAs === 'html' ? (
+                  <HtmlViewer
+                    ref={viewerRef}
+                    rawHtml={rawHtml}
+                    annotations={viewerAnnotations}
+                    onAddAnnotation={handleAddAnnotation}
+                    onSelectAnnotation={handleSelectAnnotation}
+                    selectedAnnotationId={selectedAnnotationId}
+                    mode={editorMode}
+                    globalAttachments={globalAttachments}
+                    onAddGlobalAttachment={handleAddGlobalAttachment}
+                    onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
+                    sourceInfo={sourceInfo}
+                  />
+                ) : (
+                  <Viewer
+                    key={linkedDocHook.isActive ? `doc:${linkedDocHook.filepath}` : 'plan'}
+                    ref={viewerRef}
+                    blocks={blocks}
+                    markdown={markdown}
+                    frontmatter={frontmatter}
+                    annotations={viewerAnnotations}
+                    onAddAnnotation={handleAddAnnotation}
+                    onSelectAnnotation={handleSelectAnnotation}
+                    selectedAnnotationId={selectedAnnotationId}
+                    mode={editorMode}
+                    inputMethod={inputMethod}
+                    taterMode={taterMode}
+                    globalAttachments={globalAttachments}
+                    onAddGlobalAttachment={handleAddGlobalAttachment}
+                    onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
+                    repoInfo={repoInfo}
+                    stickyActions={uiPrefs.stickyActionsEnabled}
+                    planDiffStats={linkedDocHook.isActive ? null : planDiff.diffStats}
+                    isPlanDiffActive={isPlanDiffActive}
+                    onPlanDiffToggle={() => setIsPlanDiffActive(!isPlanDiffActive)}
+                    hasPreviousVersion={!linkedDocHook.isActive && planDiff.hasPreviousVersion}
+                    showDemoBadge={!isApiMode && !isLoadingShared && !isSharedSession}
+                    maxWidth={annotateReaderMaxWidth}
+                    onOpenLinkedDoc={handleOpenLinkedDoc}
+                    onOpenCodeFile={codeFilePopout.open}
+                    linkedDocInfo={linkedDocHook.isActive ? { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label: fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath)?.isVault ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined, backLabel } : null}
+                    imageBaseDir={imageBaseDir}
+                    codePathBaseDir={activeDocBaseDir}
+                    copyLabel={annotateSource === 'message' ? 'Copy message' : annotateSource === 'file' || annotateSource === 'folder' ? 'Copy file' : undefined}
+                    archiveInfo={archive.currentInfo}
+                    sourceInfo={sourceInfo}
+                    onToggleCheckbox={checkbox.toggle}
+                    checkboxOverrides={checkbox.overrides}
+                    actionsLabelMode={actionsLabelMode}
+                  />
+                )}
               </div>
             </div>
           </OverlayScrollArea>

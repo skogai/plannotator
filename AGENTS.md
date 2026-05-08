@@ -77,6 +77,14 @@ plannotator/
 │       ├── dock/                 # Dockview center panel infrastructure
 │       ├── demoData.ts           # Demo diff for standalone mode
 │       └── index.css             # Review-specific styles
+├── skills/                          # Agent skills (agentskills.io format, `npx skills add` compatible)
+│   ├── plannotator-review/          # Lightweight: opens review UI
+│   ├── plannotator-annotate/        # Lightweight: opens annotate UI
+│   ├── plannotator-last/            # Lightweight: annotates last message
+│   ├── plannotator-compound/        # Research analysis agent (map-reduce over denied plans)
+│   ├── plannotator-setup-goal/      # Goal package scaffolder for /goal workflows
+│   ├── plannotator-plan/            # Visual HTML implementation plan generator
+│   └── plannotator-pr-explainer/    # Visual HTML PR explainer generator
 ├── .claude-plugin/marketplace.json  # For marketplace install
 └── legacy/                       # Old pre-monorepo code (reference only)
 ```

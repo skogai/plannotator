@@ -553,21 +553,21 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
             # only on the success path) leaks the location stack if a
             # PS-native cmdlet (Copy-Item etc.) throws under Stop.
             try {
-                git sparse-checkout set apps/skills 2>$null
+                git sparse-checkout set skills 2>$null
 
-                if (Test-Path "apps\skills") {
-                    $items = Get-ChildItem "apps\skills" -ErrorAction SilentlyContinue
+                if (Test-Path "skills") {
+                    $items = Get-ChildItem "skills" -ErrorAction SilentlyContinue
                     if ($items) {
                         New-Item -ItemType Directory -Force -Path $claudeSkillsDir | Out-Null
                         New-Item -ItemType Directory -Force -Path $agentsSkillsDir | Out-Null
-                        Copy-Item -Recurse -Force "apps\skills\*" $claudeSkillsDir
-                        Copy-SkillIfPresent "apps\skills\plannotator-compound" $agentsSkillsDir
-                        Copy-SkillIfPresent "apps\skills\plannotator-setup-goal" $agentsSkillsDir
+                        Copy-Item -Recurse -Force "skills\*" $claudeSkillsDir
+                        Copy-SkillIfPresent "skills\plannotator-compound" $agentsSkillsDir
+                        Copy-SkillIfPresent "skills\plannotator-setup-goal" $agentsSkillsDir
                         if ($codexAvailable) {
                             New-Item -ItemType Directory -Force -Path $codexSkillsDir | Out-Null
-                            Copy-SkillIfPresent "apps\skills\plannotator-review" $codexSkillsDir
-                            Copy-SkillIfPresent "apps\skills\plannotator-annotate" $codexSkillsDir
-                            Copy-SkillIfPresent "apps\skills\plannotator-last" $codexSkillsDir
+                            Copy-SkillIfPresent "skills\plannotator-review" $codexSkillsDir
+                            Copy-SkillIfPresent "skills\plannotator-annotate" $codexSkillsDir
+                            Copy-SkillIfPresent "skills\plannotator-last" $codexSkillsDir
                             Write-Host "Installed skills to $claudeSkillsDir\, Codex command skills to $codexSkillsDir\, and shared agent skills to $agentsSkillsDir\"
                         } else {
                             Write-Host "Installed skills to $claudeSkillsDir\ and shared agent skills to $agentsSkillsDir\"
