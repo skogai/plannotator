@@ -1364,7 +1364,7 @@ const App: React.FC = () => {
     } finally {
       setIsSubmitting(false);
     }
-  }, [callbackConfig, isSubmitting, shareUrl]);
+  }, [callbackConfig, isSubmitting, shareUrl, shortShareUrl]);
 
   const handleCallbackApprove = React.useCallback(() => callCallback(CallbackAction.Approve), [callCallback]);
   const handleCallbackFeedback = React.useCallback(() => callCallback(CallbackAction.Feedback), [callCallback]);
