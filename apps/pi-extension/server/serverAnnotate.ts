@@ -79,7 +79,7 @@ export async function startAnnotateServer(options: {
 	const draftSource =
 		options.mode === "annotate-folder" && options.folderPath
 			? `folder:${resolvePath(options.folderPath)}`
-			: options.markdown;
+			: options.renderHtml && options.rawHtml ? options.rawHtml : options.markdown;
 	const draftKey = contentHash(draftSource);
 
 	// Detect repo info (cached for this session)

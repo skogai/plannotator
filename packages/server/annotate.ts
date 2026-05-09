@@ -126,7 +126,7 @@ export async function startAnnotateServer(
   const draftSource =
     mode === "annotate-folder" && folderPath
       ? `folder:${resolvePath(folderPath)}`
-      : markdown;
+      : renderHtml && rawHtml ? rawHtml : markdown;
   const draftKey = contentHash(draftSource);
   const externalAnnotations = createExternalAnnotationHandler("plan");
 

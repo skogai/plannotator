@@ -235,7 +235,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             <iframe
             ref={iframeRef}
             srcDoc={srcdoc}
-            sandbox="allow-scripts allow-same-origin"
+            sandbox="allow-scripts"
             style={{
               width: "100%",
               height: `${iframeHeight}px`,
