@@ -1,4 +1,5 @@
-import React, { useState, useRef, useCallback, useEffect } from "react";
+import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import hljs from "highlight.js";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/shared/code-file";
 import { transformPlainText } from "../utils/inlineTransforms";
 import { getImageSrc } from "./ImageThumbnail";
@@ -33,38 +34,72 @@ function gateCodePath(
   }
 }
 
+function extToLanguage(filepath: string): string | undefined {
+  const ext = filepath.split('.').pop()?.toLowerCase();
+  const map: Record<string, string> = {
+    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+    py: 'python', rb: 'ruby', rs: 'rust', go: 'go', java: 'java',
+    css: 'css', scss: 'scss', json: 'json', yml: 'yaml', yaml: 'yaml',
+    sql: 'sql', sh: 'bash', bash: 'bash', zsh: 'bash', md: 'markdown',
+    html: 'html', xml: 'xml', toml: 'toml', swift: 'swift', kt: 'kotlin',
+  };
+  return ext ? map[ext] : undefined;
+}
+
 const CodeSnippetPreview: React.FC<{
   anchorEl: HTMLElement | null;
   contents: string;
+  filepath: string;
   line: number;
   lineEnd?: number;
-}> = ({ anchorEl, contents, line, lineEnd }) => {
+}> = ({ anchorEl, contents, filepath, line, lineEnd }) => {
   if (!anchorEl) return null;
-  const lines = contents.split('\n');
+  const allLines = contents.split('\n');
   const start = Math.max(0, line - 1);
-  const end = Math.min(lines.length, (lineEnd ?? line));
-  const snippet = lines.slice(start, end);
+  const end = Math.min(allLines.length, (lineEnd ?? line));
+  const snippet = allLines.slice(start, end).join('\n');
+
+  const highlighted = useMemo(() => {
+    const lang = extToLanguage(filepath);
+    try {
+      if (lang) return hljs.highlight(snippet, { language: lang }).value;
+      return hljs.highlightAuto(snippet).value;
+    } catch {
+      return snippet.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+  }, [snippet, filepath]);
 
   const rect = anchorEl.getBoundingClientRect();
-  const top = rect.bottom + 4;
-  const left = Math.max(8, rect.left);
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const showAbove = spaceBelow < 200 && rect.top > spaceBelow;
+  const top = showAbove ? undefined : rect.bottom + 4;
+  const bottom = showAbove ? window.innerHeight - rect.top + 4 : undefined;
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - 520));
 
   return (
     <div
       className="fixed z-[9999] rounded-lg border border-border bg-card shadow-xl overflow-hidden"
-      style={{ top, left, maxWidth: 'min(600px, 90vw)', maxHeight: '300px' }}
+      style={{ top, bottom, left, maxWidth: 'min(600px, 90vw)', maxHeight: '300px' }}
     >
-      <div className="px-3 py-1.5 border-b border-border/50 text-[10px] text-muted-foreground font-mono">
-        {lineEnd && lineEnd !== line ? `lines ${line}–${lineEnd}` : `line ${line}`}
+      <div className="px-3 py-1.5 border-b border-border/50 text-[10px] text-muted-foreground font-mono flex items-center justify-between gap-4">
+        <span>{filepath.split('/').pop()}</span>
+        <span className="opacity-60">{lineEnd && lineEnd !== line ? `lines ${line}–${lineEnd}` : `line ${line}`}</span>
       </div>
-      <pre className="overflow-auto p-3 text-[12px] leading-5 font-mono text-foreground/90">
-        {snippet.map((l, i) => (
-          <div key={start + i} className="flex">
-            <span className="select-none text-muted-foreground/40 w-8 text-right pr-3 flex-shrink-0">{start + i + 1}</span>
-            <span>{l || ' '}</span>
-          </div>
-        ))}
-      </pre>
+      <div className="overflow-auto p-0 text-[12px] leading-5">
+        <table className="border-collapse w-full">
+          <tbody>
+            {snippet.split('\n').map((_, i) => (
+              <tr key={start + i} className="hover:bg-muted/30">
+                <td className="select-none text-muted-foreground/40 text-right pr-3 pl-3 py-0 align-top font-mono w-8 whitespace-nowrap">{start + i + 1}</td>
+                <td
+                  className="hljs font-mono pr-3 py-0 whitespace-pre"
+                  dangerouslySetInnerHTML={{ __html: highlighted.split('\n')[i] ?? '' }}
+                />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 };
@@ -77,7 +112,7 @@ const CodeFileLink: React.FC<{
   const validation = useCodePathValidation();
   const gate = gateCodePath(candidate, validation);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [hoverPreview, setHoverPreview] = useState<{ contents: string } | null>(null);
+  const [hoverPreview, setHoverPreview] = useState<{ contents: string; filepath: string } | null>(null);
   const anchorRef = useRef<HTMLElement | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const parsed = parseCodePath(candidate);
@@ -89,9 +124,9 @@ const CodeFileLink: React.FC<{
       try {
         const res = await fetch(`/api/doc?path=${encodeURIComponent(candidate)}`);
         const data = await res.json();
-        if (data.contents) setHoverPreview({ contents: data.contents });
+        if (data.contents) setHoverPreview({ contents: data.contents, filepath: data.filepath ?? candidate });
       } catch {}
-    }, 300);
+    }, 150);
   }, [candidate, hasLineRef, gate.render]);
 
   const handleMouseLeave = useCallback(() => {
@@ -146,6 +181,7 @@ const CodeFileLink: React.FC<{
         <CodeSnippetPreview
           anchorEl={anchorRef.current}
           contents={hoverPreview.contents}
+          filepath={hoverPreview.filepath}
           line={parsed.line!}
           lineEnd={parsed.lineEnd}
         />
