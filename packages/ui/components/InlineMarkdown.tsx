@@ -60,17 +60,18 @@ const CodeSnippetPreview: React.FC<{
   const end = Math.min(allLines.length, (lineEnd ?? line));
   const snippet = allLines.slice(start, end).join('\n');
 
-  const highlighted = useMemo(() => {
+  const highlightedLines = useMemo(() => {
     const lang = extToLanguage(filepath);
-    try {
-      if (lang) return hljs.highlight(snippet, { language: lang }).value;
-      return hljs.highlightAuto(snippet).value;
-    } catch {
-      return snippet.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    }
+    const lines = snippet.split('\n');
+    return lines.map(line => {
+      try {
+        if (lang) return hljs.highlight(line, { language: lang }).value;
+        return hljs.highlightAuto(line).value;
+      } catch {
+        return line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+    });
   }, [snippet, filepath]);
-
-  const highlightedLines = useMemo(() => highlighted.split('\n'), [highlighted]);
 
   if (!anchorEl) return null;
 
@@ -81,6 +82,8 @@ const CodeSnippetPreview: React.FC<{
   const bottom = showAbove ? window.innerHeight - rect.top + 4 : undefined;
   const left = Math.max(8, Math.min(rect.left, window.innerWidth - 520));
 
+  // TODO: render via createPortal(... , document.body) to avoid position: fixed
+  // breaking when an ancestor has transform/backdrop-filter (same fix as CodeFilePicker)
   return (
     <div
       className="fixed z-[9999] rounded-lg border border-border bg-card shadow-xl flex flex-col"

@@ -49,7 +49,6 @@ Reference real source files inline. Plannotator validates the path and renders a
   \`packages/server/index.ts:10-20\`      line range — hover shows a code snippet preview
   [the handler](packages/server/index.ts:42)  markdown link form
 Ambiguous paths (e.g. \`index.ts\`) still render and open a picker.
-Line references (\`:42\` or \`:10-20\`) open the file scrolled to that region.
 
 Callouts and alerts
 GitHub-style alerts highlight critical context:
