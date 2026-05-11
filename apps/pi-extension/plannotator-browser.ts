@@ -479,7 +479,7 @@ export async function startMarkdownAnnotationSession(
 	}
 
 	let resolvedMarkdown = markdown;
-	if (!resolvedMarkdown.trim() && existsSync(filePath)) {
+	if (!renderHtml && !resolvedMarkdown.trim() && existsSync(filePath)) {
 		try {
 			const fileStat = statSync(filePath);
 			if (!fileStat.isDirectory()) {
