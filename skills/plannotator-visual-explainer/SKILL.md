@@ -41,10 +41,20 @@ Read `references/theme-override.md` for the exact CSS custom properties to use. 
 1. **Read** visual-explainer's SKILL.md (full workflow, diagram types, quality checks)
 2. **Read** the relevant visual-explainer references and templates for your content type
 3. **Read** `references/theme-override.md` from this skill
-4. **Generate** following visual-explainer's structure and rules, but with Plannotator tokens
-5. **Deliver** to the project root or `/tmp/` and tell the user the path
+4. **Generate** following visual-explainer's structure, component classes, and rules, but with Plannotator tokens. Use Nico's component classes (`.ve-card`, `.ve-card--hero`, `.kpi-card`, `.pipeline`, etc.) — do NOT fall back to other pattern sets.
+5. **Deliver** via Plannotator's annotation UI:
 
-The output is a standalone HTML file that works in any browser. It can also be opened in Plannotator's annotation UI via `plannotator annotate <file> --render-html` for collaborative review.
+**If the output is a plan or proposal** (something the user should approve/deny):
+```bash
+plannotator annotate <file> --render-html --gate
+```
+
+**If the output is a visual explainer, diagram, or informational page:**
+```bash
+plannotator annotate <file> --render-html
+```
+
+Always use `--render-html` so the HTML renders as-is in the Plannotator UI with theme inheritance and annotation support. Do NOT use `open` or `xdg-open` directly.
 
 ## What visual-explainer provides (do not duplicate)
 
