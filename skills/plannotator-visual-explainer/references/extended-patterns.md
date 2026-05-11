@@ -234,9 +234,9 @@ Callout cards for unresolved decisions. Each names who can answer.
 
 ## Inline SVG Diagrams
 
-For simple architecture or data flow diagrams where Mermaid is overkill (under 8 nodes, simple topology). Use Mermaid for anything with complex edge routing.
+For architecture, data flow, and simple flowcharts where Mermaid is overkill (under 8 nodes, simple topology). These produce crisp, theme-aware vector diagrams drawn directly in the HTML. Use Mermaid for anything with complex edge routing (10+ nodes, many crossing connections).
 
-Wrap in a bordered panel:
+### Container
 
 ```html
 <div class="svg-panel">
@@ -266,29 +266,218 @@ Wrap in a bordered panel:
 }
 ```
 
-SVG elements use theme tokens via CSS classes:
+### Arrow markers
 
-```css
-/* Define inside the <svg> <style> block */
-.box   { fill: var(--card); stroke: var(--border); stroke-width: 1.5; }
-.box-new { fill: color-mix(in oklab, var(--primary) 8%, transparent);
-           stroke: var(--primary); stroke-width: 1.5; }
-.label { font-family: var(--font-sans); font-size: 13px;
-         font-weight: 600; fill: var(--foreground); }
-.sub   { font-family: var(--font-mono); font-size: 10.5px;
-         fill: var(--muted-foreground); }
-.conn  { stroke: var(--muted-foreground); stroke-width: 1.5; }
-```
+Define in `<defs>`. Reference via `marker-end="url(#arrow)"`.
 
-Arrow markers:
 ```svg
 <defs>
-  <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5"
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
           markerWidth="7" markerHeight="7" orient="auto-start-reverse">
     <path d="M0,0 L10,5 L0,10 z" fill="var(--muted-foreground)"/>
   </marker>
+  <marker id="arrow-primary" viewBox="0 0 10 10" refX="9" refY="5"
+          markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="var(--primary)"/>
+  </marker>
+  <marker id="arrow-success" viewBox="0 0 10 10" refX="9" refY="5"
+          markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="var(--success)"/>
+  </marker>
+  <marker id="arrow-destructive" viewBox="0 0 10 10" refX="9" refY="5"
+          markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="var(--destructive)"/>
+  </marker>
 </defs>
 ```
+
+### Box node
+
+```svg
+<g transform="translate(100, 80)">
+  <rect width="140" height="56" rx="10" fill="var(--card)"
+        stroke="var(--border)" stroke-width="1.5"/>
+  <text x="70" y="24" text-anchor="middle"
+        font-family="var(--font-sans)" font-size="13" font-weight="600"
+        fill="var(--foreground)">API Server</text>
+  <text x="70" y="40" text-anchor="middle"
+        font-family="var(--font-mono)" font-size="10.5"
+        fill="var(--muted-foreground)">Express + middleware</text>
+</g>
+```
+
+### Highlighted box (new or hot-path component)
+
+```svg
+<g transform="translate(100, 80)">
+  <rect width="140" height="56" rx="10"
+        fill="color-mix(in oklab, var(--primary) 8%, transparent)"
+        stroke="var(--primary)" stroke-width="1.5"/>
+  <text x="70" y="24" text-anchor="middle"
+        font-family="var(--font-sans)" font-size="13" font-weight="600"
+        fill="var(--foreground)">New Service</text>
+  <text x="70" y="40" text-anchor="middle"
+        font-family="var(--font-mono)" font-size="10.5"
+        fill="var(--primary)">to be created</text>
+</g>
+```
+
+### Connecting arrows
+
+```svg
+<!-- Horizontal -->
+<line x1="240" y1="108" x2="320" y2="108"
+      stroke="var(--muted-foreground)" stroke-width="1.5"
+      marker-end="url(#arrow)"/>
+
+<!-- Vertical -->
+<line x1="170" y1="136" x2="170" y2="200"
+      stroke="var(--muted-foreground)" stroke-width="1.5"
+      marker-end="url(#arrow)"/>
+
+<!-- Dashed (async, optional, or secondary path) -->
+<line x1="240" y1="108" x2="320" y2="108"
+      stroke="var(--primary)" stroke-width="1.5"
+      stroke-dasharray="5 4"
+      marker-end="url(#arrow-primary)"/>
+```
+
+### Edge labels
+
+```svg
+<text x="280" y="100" text-anchor="middle"
+      font-family="var(--font-mono)" font-size="9.5"
+      fill="var(--muted-foreground)">REST</text>
+```
+
+### Flowchart elements
+
+```svg
+<!-- Decision diamond -->
+<path d="M310,262 L352,294 L310,326 L268,294 Z"
+      fill="var(--card)" stroke="var(--border)" stroke-width="1.5"/>
+<text x="310" y="298" text-anchor="middle"
+      font-family="var(--font-sans)" font-size="11" font-weight="500"
+      fill="var(--foreground)">Valid?</text>
+
+<!-- Terminal / pill node -->
+<rect x="260" y="20" width="100" height="36" rx="18"
+      fill="var(--card)" stroke="var(--border)" stroke-width="1.5"/>
+
+<!-- Success endpoint -->
+<rect x="260" y="400" width="100" height="36" rx="18"
+      fill="color-mix(in oklab, var(--success) 12%, transparent)"
+      stroke="var(--success)" stroke-width="1.5"/>
+
+<!-- Failure endpoint -->
+<rect x="100" y="400" width="100" height="36" rx="18"
+      fill="color-mix(in oklab, var(--destructive) 12%, transparent)"
+      stroke="var(--destructive)" stroke-width="1.5"/>
+
+<!-- Curved branch from decision to side -->
+<path d="M268,294 C200,294 160,294 160,240"
+      fill="none" stroke="var(--destructive)" stroke-width="1.5"
+      marker-end="url(#arrow-destructive)"/>
+```
+
+### Data flow (request/response)
+
+```svg
+<!-- Request (solid) -->
+<line x1="140" y1="100" x2="280" y2="100"
+      stroke="var(--muted-foreground)" stroke-width="1.5"
+      marker-end="url(#arrow)"/>
+<text x="210" y="92" text-anchor="middle"
+      font-family="var(--font-mono)" font-size="9.5"
+      fill="var(--muted-foreground)">POST /api/plan</text>
+
+<!-- Response (dashed) -->
+<line x1="280" y1="116" x2="140" y2="116"
+      stroke="var(--primary)" stroke-width="1.5" stroke-dasharray="5 4"
+      marker-end="url(#arrow-primary)"/>
+<text x="210" y="132" text-anchor="middle"
+      font-family="var(--font-mono)" font-size="9.5"
+      fill="var(--primary)">{ plan, status }</text>
+```
+
+### Fan-out pattern
+
+```svg
+<line x1="200" y1="100" x2="340" y2="60"
+      stroke="var(--muted-foreground)" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="200" y1="100" x2="340" y2="100"
+      stroke="var(--muted-foreground)" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="200" y1="100" x2="340" y2="140"
+      stroke="var(--muted-foreground)" stroke-width="1.5" marker-end="url(#arrow)"/>
+```
+
+### Bar chart
+
+```svg
+<svg viewBox="0 0 400 180" xmlns="http://www.w3.org/2000/svg"
+     style="width:100%;max-width:400px">
+  <!-- Gridlines -->
+  <line x1="40" y1="20" x2="380" y2="20" stroke="var(--border)" stroke-width="1" opacity="0.5"/>
+  <line x1="40" y1="60" x2="380" y2="60" stroke="var(--border)" stroke-width="1" opacity="0.5"/>
+  <line x1="40" y1="100" x2="380" y2="100" stroke="var(--border)" stroke-width="1" opacity="0.5"/>
+  <line x1="40" y1="140" x2="380" y2="140" stroke="var(--border)" stroke-width="1"/>
+
+  <!-- Bars (muted default, primary for peak) -->
+  <rect x="60" y="60" width="40" height="80" rx="4" fill="var(--muted)"/>
+  <rect x="120" y="40" width="40" height="100" rx="4" fill="var(--primary)"/>
+  <rect x="180" y="80" width="40" height="60" rx="4" fill="var(--muted)"/>
+
+  <!-- Value labels above bars -->
+  <text x="140" y="35" text-anchor="middle"
+        font-family="var(--font-mono)" font-size="10" font-weight="600"
+        fill="var(--primary)">25</text>
+
+  <!-- X-axis labels -->
+  <text x="80" y="158" text-anchor="middle"
+        font-family="var(--font-mono)" font-size="9"
+        fill="var(--muted-foreground)">Q1</text>
+</svg>
+```
+
+### Using CSS classes in SVG
+
+For cleaner markup, define reusable classes inside the SVG:
+
+```svg
+<svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .box   { fill: var(--card); stroke: var(--border); stroke-width: 1.5; }
+    .new   { fill: color-mix(in oklab, var(--primary) 8%, transparent);
+             stroke: var(--primary); stroke-width: 1.5; }
+    .title { font-family: var(--font-sans); font-size: 13px;
+             font-weight: 600; fill: var(--foreground); }
+    .sub   { font-family: var(--font-mono); font-size: 10.5px;
+             fill: var(--muted-foreground); }
+    .conn  { stroke: var(--muted-foreground); stroke-width: 1.5; }
+  </style>
+</svg>
+```
+
+### Positioning rules
+
+- `viewBox` with fixed coordinates + `style="width:100%;max-width:720px"` for responsive scaling
+- Standard node: `120–160px` wide, `48–56px` tall
+- Minimum gap: `60px` horizontal, `40px` vertical
+- Arrow label offset: `8–12px` above the line
+
+### Color roles in SVG
+
+| Element | Token |
+|---------|-------|
+| Box background | `var(--card)` |
+| Box stroke | `var(--border)` |
+| Highlighted box | `var(--primary)` stroke, `color-mix(in oklab, var(--primary) 8%, transparent)` fill |
+| Arrows / connectors | `var(--muted-foreground)` |
+| Title text | `var(--foreground)` |
+| Subtitle / labels | `var(--muted-foreground)` |
+| Success path | `var(--success)` |
+| Error path | `var(--destructive)` |
+| Warning | `var(--warning)` |
 
 ## Section Headers
 
