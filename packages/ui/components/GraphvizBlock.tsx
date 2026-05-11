@@ -1,21 +1,9 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { instance } from '@viz-js/viz';
+import rough from 'roughjs';
 import type { Block } from '../types';
 import { useConfigValue } from '../config/useConfig';
-
-let roughPromise: Promise<any> | null = null;
-function loadRoughJs(): Promise<any> {
-  if (roughPromise) return roughPromise;
-  roughPromise = new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://unpkg.com/roughjs@4.6.6/bundled/rough.js';
-    script.onload = () => resolve((window as any).rough);
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-  return roughPromise;
-}
 
 function parsePoints(pointsStr: string): [number, number][] {
   const nums = pointsStr.trim().split(/[\s,]+/).map(Number);
@@ -26,8 +14,7 @@ function parsePoints(pointsStr: string): [number, number][] {
   return result;
 }
 
-async function sketchifySvg(svgMarkup: string): Promise<string> {
-  const rough = await loadRoughJs();
+function sketchifySvg(svgMarkup: string): string {
   const parser = new DOMParser();
   const doc = parser.parseFromString(svgMarkup, 'image/svg+xml');
   const svgEl = doc.querySelector('svg');
@@ -291,7 +278,6 @@ export const GraphvizBlock: React.FC<{ block: Block }> = ({ block }) => {
           .replace(/fill="#000000"/g, 'fill="var(--foreground)"')
           .replace(/stroke="black"/g, 'stroke="var(--muted-foreground)"')
           .replace(/stroke="#000000"/g, 'stroke="var(--muted-foreground)"')
-          .replace(/fill="none"(.*?)stroke="black"/g, 'fill="none"$1stroke="var(--muted-foreground)"')
           .replace(/fill="lightgrey"/g, 'fill="var(--muted)"')
           .replace(/fill="lightgray"/g, 'fill="var(--muted)"');
 
@@ -316,7 +302,7 @@ export const GraphvizBlock: React.FC<{ block: Block }> = ({ block }) => {
           naturalBoundsRef.current = parseViewBoxFromMarkup(cleaned);
           if (sketchMode) {
             try {
-              const sketched = await sketchifySvg(cleaned);
+              const sketched = sketchifySvg(cleaned);
               if (!cancelled) { setSvg(sketched); setError(null); }
             } catch {
               if (!cancelled) { setSvg(cleaned); setError(null); }

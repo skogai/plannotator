@@ -55,7 +55,6 @@ const CodeSnippetPreview: React.FC<{
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
 }> = ({ anchorEl, contents, filepath, line, lineEnd, onMouseEnter, onMouseLeave }) => {
-  if (!anchorEl) return null;
   const allLines = contents.split('\n');
   const start = Math.max(0, line - 1);
   const end = Math.min(allLines.length, (lineEnd ?? line));
@@ -70,6 +69,10 @@ const CodeSnippetPreview: React.FC<{
       return snippet.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
   }, [snippet, filepath]);
+
+  const highlightedLines = useMemo(() => highlighted.split('\n'), [highlighted]);
+
+  if (!anchorEl) return null;
 
   const rect = anchorEl.getBoundingClientRect();
   const spaceBelow = window.innerHeight - rect.bottom;
@@ -97,7 +100,7 @@ const CodeSnippetPreview: React.FC<{
                 <td className="select-none text-muted-foreground/40 text-right pr-3 pl-3 py-0 align-top font-mono w-8 whitespace-nowrap" style={{ userSelect: 'none' }}>{start + i + 1}</td>
                 <td
                   className="font-mono pr-3 py-0 whitespace-pre"
-                  dangerouslySetInnerHTML={{ __html: highlighted.split('\n')[i] ?? '' }}
+                  dangerouslySetInnerHTML={{ __html: highlightedLines[i] ?? '' }}
                 />
               </tr>
             ))}
@@ -112,7 +115,8 @@ const CodeFileLink: React.FC<{
   candidate: string;
   display: string;
   onOpenCodeFile: (path: string) => void;
-}> = ({ candidate, display, onOpenCodeFile }) => {
+  baseDir?: string;
+}> = ({ candidate, display, onOpenCodeFile, baseDir }) => {
   const validation = useCodePathValidation();
   const gate = gateCodePath(candidate, validation);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -140,12 +144,14 @@ const CodeFileLink: React.FC<{
     if (hoverPreview) return;
     showTimerRef.current = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/doc?path=${encodeURIComponent(candidate)}`);
+        const params = new URLSearchParams({ path: candidate });
+        if (baseDir) params.set('base', baseDir);
+        const res = await fetch(`/api/doc?${params}`);
         const data = await res.json();
         if (data.contents) setHoverPreview({ contents: data.contents, filepath: data.filepath ?? candidate });
       } catch {}
     }, 150);
-  }, [candidate, hasLineRef, gate.render, cancelHide, hoverPreview]);
+  }, [candidate, hasLineRef, gate.render, cancelHide, hoverPreview, baseDir]);
 
   const handleMouseLeave = useCallback(() => {
     if (showTimerRef.current) { clearTimeout(showTimerRef.current); showTimerRef.current = null; }
@@ -182,7 +188,9 @@ const CodeFileLink: React.FC<{
       setPickerOpen(true);
       return;
     }
-    onOpenCodeFile(gate.render === 'link' && gate.resolved ? gate.resolved : candidate);
+    const resolvedPath = gate.render === 'link' && gate.resolved ? gate.resolved : candidate;
+    const lineSuffix = parsed.line != null ? `:${parsed.line}${parsed.lineEnd != null ? `-${parsed.lineEnd}` : ''}` : '';
+    onOpenCodeFile(gate.render === 'link' && gate.resolved ? resolvedPath + lineSuffix : candidate);
   };
 
   return (
@@ -280,6 +288,7 @@ function emitPlainTextWithBareUrls(
   nextKey: () => number,
   onOpenCodeFile?: (path: string) => void,
   validation?: CodePathValidationContextValue | null,
+  baseDir?: string,
 ): void {
   if (text.length === 0) return;
 
@@ -351,6 +360,7 @@ function emitPlainTextWithBareUrls(
             candidate={cleanPath}
             display={span.value}
             onOpenCodeFile={onOpenCodeFile!}
+            baseDir={baseDir}
           />,
         );
       }
@@ -591,6 +601,7 @@ export const InlineMarkdown: React.FC<{
             candidate={cleanPath}
             display={codeContent}
             onOpenCodeFile={onOpenCodeFile}
+            baseDir={imageBaseDir}
           />,
         );
       } else {
@@ -948,7 +959,7 @@ export const InlineMarkdown: React.FC<{
     // detected inline via emitPlainTextWithBareUrls() below.
     const nextSpecial = remaining.slice(1).search(/[\*_`\[!~\\<#@]/);
     const plainText = nextSpecial === -1 ? remaining : remaining.slice(0, nextSpecial + 1);
-    emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile, validation);
+    emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
     previousChar = plainText[plainText.length - 1] || previousChar;
     if (nextSpecial === -1) {
       break;

@@ -195,6 +195,7 @@ export function getServerConfig(gitUser: string | null): {
   gitUser?: string;
   conventionalComments?: boolean;
   conventionalLabels?: CCLabelConfig[] | null;
+  sketchDiagrams?: boolean;
 } {
   const cfg = loadConfig();
   return {
