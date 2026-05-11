@@ -234,6 +234,20 @@ export const SETTINGS = {
       }
     },
   },
+  sketchDiagrams: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-sketch-diagrams');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-sketch-diagrams', String(v)),
+    serverKey: 'sketchDiagrams',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = sc.sketchDiagrams;
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (v: boolean) => ({ sketchDiagrams: v }),
+  },
 } satisfies Record<string, SettingDef<unknown>>;
 
 export type SettingsMap = typeof SETTINGS;

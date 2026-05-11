@@ -122,6 +122,11 @@ export interface PlannotatorConfig {
    * Read by the `improve-context` PreToolUse handler. Default: false.
    */
   pfmReminder?: boolean;
+  /**
+   * Render Graphviz diagrams with a hand-drawn sketch style using rough.js.
+   * Default: true.
+   */
+  sketchDiagrams?: boolean;
 }
 
 const CONFIG_DIR = join(homedir(), ".plannotator");
@@ -198,6 +203,7 @@ export function getServerConfig(gitUser: string | null): {
     gitUser: gitUser ?? undefined,
     ...(cfg.conventionalComments !== undefined && { conventionalComments: cfg.conventionalComments }),
     ...(cfg.conventionalLabels !== undefined && { conventionalLabels: cfg.conventionalLabels }),
+    sketchDiagrams: cfg.sketchDiagrams ?? true,
   };
 }
 
