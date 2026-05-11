@@ -1,9 +1,11 @@
 import React from 'react';
 import type { Origin } from '@plannotator/shared/agents';
+import type { Agent } from '@plannotator/ui/hooks/useAgents';
 import { FeedbackButton, ApproveButton, ExitButton } from '@plannotator/ui/components/ToolbarButtons';
 import { ApproveDropdown } from '@plannotator/ui/components/ApproveDropdown';
 import { Settings } from '@plannotator/ui/components/Settings';
 import { PlanHeaderMenu } from '@plannotator/ui/components/PlanHeaderMenu';
+import type { CallbackConfig } from '@plannotator/ui/utils/callback';
 import type { UIPreferences } from '@plannotator/ui/utils/uiPreferences';
 
 interface AppHeaderProps {
@@ -24,11 +26,11 @@ interface AppHeaderProps {
   callbackShareUrlReady: boolean;
   canShareCurrentSession: boolean;
   agentName: string;
-  availableAgents: string[];
+  availableAgents: Agent[];
   showAnnotationsWarning: boolean;
 
   // Callback config (null when no bot callback)
-  callbackConfig: unknown | null;
+  callbackConfig: CallbackConfig | null;
 
   // Settings props
   taterMode: boolean;
@@ -280,7 +282,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   );
 });
 
-const AppHeaderLogo = React.memo(() => (
+const AppHeaderLogo = () => (
   <div className="flex items-center gap-2 md:gap-3">
     <a
       href="https://plannotator.ai"
@@ -291,4 +293,4 @@ const AppHeaderLogo = React.memo(() => (
       <span className="text-sm font-semibold tracking-tight">Plannotator</span>
     </a>
   </div>
-));
+);
