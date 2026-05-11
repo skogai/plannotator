@@ -53,17 +53,17 @@ export const BRIDGE_SCRIPT = `(function() {
   });
 
   // --- Resize ---
+  var lastHeight = 0;
   function postResize() {
-    parent.postMessage({
-      type: PREFIX + 'resize',
-      height: document.documentElement.scrollHeight
-    }, '*');
+    var h = document.body.scrollHeight;
+    if (h !== lastHeight) {
+      lastHeight = h;
+      parent.postMessage({ type: PREFIX + 'resize', height: h }, '*');
+    }
   }
   window.addEventListener('load', postResize);
   if (typeof ResizeObserver !== 'undefined') {
-    new ResizeObserver(function() {
-      postResize();
-    }).observe(document.documentElement);
+    new ResizeObserver(postResize).observe(document.body);
   }
 
   // --- Selection ---
