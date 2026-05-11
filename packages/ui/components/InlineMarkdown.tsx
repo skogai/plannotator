@@ -52,7 +52,9 @@ const CodeSnippetPreview: React.FC<{
   filepath: string;
   line: number;
   lineEnd?: number;
-}> = ({ anchorEl, contents, filepath, line, lineEnd }) => {
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+}> = ({ anchorEl, contents, filepath, line, lineEnd, onMouseEnter, onMouseLeave }) => {
   if (!anchorEl) return null;
   const allLines = contents.split('\n');
   const start = Math.max(0, line - 1);
@@ -80,6 +82,8 @@ const CodeSnippetPreview: React.FC<{
     <div
       className="fixed z-[9999] rounded-lg border border-border bg-card shadow-xl overflow-hidden"
       style={{ top, bottom, left, maxWidth: 'min(600px, 90vw)', maxHeight: '300px' }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
     >
       <div className="px-3 py-1.5 border-b border-border/50 text-[10px] text-muted-foreground font-mono flex items-center justify-between gap-4">
         <span>{filepath.split('/').pop()}</span>
@@ -113,30 +117,58 @@ const CodeFileLink: React.FC<{
   const gate = gateCodePath(candidate, validation);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [hoverPreview, setHoverPreview] = useState<{ contents: string; filepath: string } | null>(null);
+  const [previewHovered, setPreviewHovered] = useState(false);
   const anchorRef = useRef<HTMLElement | null>(null);
-  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const parsed = parseCodePath(candidate);
   const hasLineRef = parsed.line != null;
 
+  const cancelHide = useCallback(() => {
+    if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
+  }, []);
+
+  const scheduleHide = useCallback(() => {
+    cancelHide();
+    hideTimerRef.current = setTimeout(() => {
+      setHoverPreview(null);
+      setPreviewHovered(false);
+    }, 200);
+  }, [cancelHide]);
+
   const handleMouseEnter = useCallback(() => {
     if (!hasLineRef || gate.render === 'plain') return;
-    hoverTimerRef.current = setTimeout(async () => {
+    cancelHide();
+    if (hoverPreview) return;
+    showTimerRef.current = setTimeout(async () => {
       try {
         const res = await fetch(`/api/doc?path=${encodeURIComponent(candidate)}`);
         const data = await res.json();
         if (data.contents) setHoverPreview({ contents: data.contents, filepath: data.filepath ?? candidate });
       } catch {}
     }, 150);
-  }, [candidate, hasLineRef, gate.render]);
+  }, [candidate, hasLineRef, gate.render, cancelHide, hoverPreview]);
 
   const handleMouseLeave = useCallback(() => {
-    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-    hoverTimerRef.current = null;
-    setHoverPreview(null);
-  }, []);
+    if (showTimerRef.current) { clearTimeout(showTimerRef.current); showTimerRef.current = null; }
+    scheduleHide();
+  }, [scheduleHide]);
+
+  const handlePreviewEnter = useCallback(() => {
+    cancelHide();
+    setPreviewHovered(true);
+  }, [cancelHide]);
+
+  const handlePreviewLeave = useCallback(() => {
+    setPreviewHovered(false);
+    scheduleHide();
+  }, [scheduleHide]);
 
   useEffect(() => {
-    return () => { if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current); };
+    return () => {
+      if (showTimerRef.current) clearTimeout(showTimerRef.current);
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    };
   }, []);
 
   if (gate.render === 'plain') {
@@ -184,6 +216,8 @@ const CodeFileLink: React.FC<{
           filepath={hoverPreview.filepath}
           line={parsed.line!}
           lineEnd={parsed.lineEnd}
+          onMouseEnter={handlePreviewEnter}
+          onMouseLeave={handlePreviewLeave}
         />
       )}
       {pickerOpen && isAmbiguous && (
