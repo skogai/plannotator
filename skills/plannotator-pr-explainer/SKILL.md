@@ -31,8 +31,8 @@ For a one-file typo fix, a plain text PR description is fine.
 ## How to use this skill
 
 1. Read `references/pr-components.md` for PR-specific component patterns (diffs, comments, risk maps, file tours)
-2. Read `../plannotator-plan/references/design-system.md` for the shared Plannotator design system tokens
-3. Read `../plannotator-plan/references/svg-patterns.md` for SVG diagram building blocks
+2. Read `../plannotator-visual-plan/references/design-system.md` for the shared Plannotator design system tokens
+3. Read `../plannotator-visual-plan/references/svg-patterns.md` for SVG diagram building blocks
 4. Analyze the diff (use `git diff`, `git log`, or the user's provided changes)
 5. Generate the HTML file and save it
 6. Tell the user where the file is
@@ -54,7 +54,7 @@ A bordered card with clay left accent summarizing in 2-3 sentences what this PR 
 
 ### Section menu — pick what fits
 
-**Architecture / data flow changes** — SVG diagram showing what changed structurally. Highlight new components with `--primary` stroke, removed ones with `--destructive`. Show the before and after if the architecture shifted. See `../plannotator-plan/references/svg-patterns.md`.
+**Architecture / data flow changes** — SVG diagram showing what changed structurally. Highlight new components with `--primary` stroke, removed ones with `--destructive`. Show the before and after if the architecture shifted. See `../plannotator-visual-plan/references/svg-patterns.md`.
 
 **Before / after comparison** — Two-column grid showing old behavior vs. new behavior. The "after" column gets a `--success` border. Can show UI screenshots, API responses, data shapes, or behavioral descriptions.
 
@@ -107,7 +107,7 @@ Be creative with diagrams. If a sequence diagram explains the bug better than pr
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PR: {title}</title>
   <style>
-    /* Plannotator theme defaults — see plannotator-plan/references/design-system.md */
+    /* Plannotator theme defaults — see plannotator-visual-plan/references/design-system.md */
     :root { /* ... */ }
     /* Base + component styles */
     /* Diff rendering styles */

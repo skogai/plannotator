@@ -83,7 +83,7 @@ plannotator/
 │   ├── plannotator-last/            # Lightweight: annotates last message
 │   ├── plannotator-compound/        # Research analysis agent (map-reduce over denied plans)
 │   ├── plannotator-setup-goal/      # Goal package scaffolder for /goal workflows
-│   ├── plannotator-plan/            # Visual HTML implementation plan generator
+│   ├── plannotator-visual-plan/      # Visual HTML implementation plan generator
 │   └── plannotator-pr-explainer/    # Visual HTML PR explainer generator
 ├── .claude-plugin/marketplace.json  # For marketplace install
 └── legacy/                       # Old pre-monorepo code (reference only)
