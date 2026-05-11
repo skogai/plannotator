@@ -165,7 +165,14 @@ export const GraphvizBlock: React.FC<{ block: Block }> = ({ block }) => {
           .replace(/ width="[^"]*"/, ' width="100%"')
           .replace(/ height="[^"]*"/, ' height="100%"')
           .replace(/ style="[^"]*"/, '')
-          .replace(/<polygon[^>]*fill="white"[^>]*\/>/, '');
+          .replace(/<polygon[^>]*fill="white"[^>]*\/>/, '')
+          .replace(/fill="black"/g, 'fill="var(--foreground)"')
+          .replace(/fill="#000000"/g, 'fill="var(--foreground)"')
+          .replace(/stroke="black"/g, 'stroke="var(--muted-foreground)"')
+          .replace(/stroke="#000000"/g, 'stroke="var(--muted-foreground)"')
+          .replace(/fill="none"(.*?)stroke="black"/g, 'fill="none"$1stroke="var(--muted-foreground)"')
+          .replace(/fill="lightgrey"/g, 'fill="var(--muted)"')
+          .replace(/fill="lightgray"/g, 'fill="var(--muted)"');
         if (!cancelled) {
           naturalBoundsRef.current = parseViewBoxFromMarkup(cleaned);
           setSvg(cleaned);
@@ -462,7 +469,7 @@ export const GraphvizBlock: React.FC<{ block: Block }> = ({ block }) => {
   const diagramBody = (
     <div
       ref={containerRef}
-      className={`rounded-xl bg-muted/30 border border-border/30 overflow-hidden select-none cursor-grab graphviz-themed ${isExpanded ? 'h-full min-h-0' : ''}`}
+      className={`rounded-xl bg-muted/30 border border-border/30 overflow-hidden select-none cursor-grab ${isExpanded ? 'h-full min-h-0' : ''}`}
       style={isExpanded ? undefined : { height: naturalHeight }}
       dangerouslySetInnerHTML={{ __html: svg }}
       onMouseDown={handleMouseDown}
