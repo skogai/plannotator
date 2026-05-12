@@ -116,14 +116,6 @@ export function RoomMenu({
               onCopyParticipantUrl();
             }}
           />
-          <ActionMenuItem
-            icon={CopyIcon}
-            label="Copy consolidated feedback"
-            onClick={() => {
-              closeMenu();
-              onCopyConsolidatedFeedback();
-            }}
-          />
           {/*
             "Copy agent instructions" — the clipboard payload teaches
             an AI agent (Claude Code, Codex, etc.) how to join THIS

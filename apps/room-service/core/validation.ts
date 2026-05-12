@@ -17,14 +17,16 @@ const MAX_SNAPSHOT_CIPHERTEXT_LENGTH = 1_500_000; // ~1.5 MB
 const MAX_EVENT_CIPHERTEXT_LENGTH = 512_000; // ~512 KB per event
 const MAX_PRESENCE_CIPHERTEXT_LENGTH = 8_192; // ~8 KB per presence update
 
-/** Clamp expiry days to [1, 30], default 30. */
-export function clampExpiryDays(days: number | undefined): number {
+/** Clamp expiry days to [1, 30], default 30. 0 means never. */
+export function clampExpiryDays(days: number | undefined): number | null {
   if (days === undefined || days === null) return DEFAULT_EXPIRY_DAYS;
+  if (days === 0) return null;
   return Math.max(MIN_EXPIRY_DAYS, Math.min(MAX_EXPIRY_DAYS, Math.floor(days)));
 }
 
-/** True when a room is beyond its fixed retention deadline. */
-export function hasRoomExpired(expiresAt: number, now: number = Date.now()): boolean {
+/** True when a room is beyond its fixed retention deadline. Never-expiring rooms return false. */
+export function hasRoomExpired(expiresAt: number | null, now: number = Date.now()): boolean {
+  if (expiresAt === null) return false;
   return now > expiresAt;
 }
 

@@ -9,6 +9,13 @@
 
 const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
 
+function getCookieDomain(): string {
+  if (typeof document === 'undefined') return '';
+  const host = document.location.hostname;
+  if (host.endsWith('.plannotator.ai')) return '; domain=.plannotator.ai';
+  return '';
+}
+
 /**
  * Get a value from cookie storage
  */
@@ -27,7 +34,7 @@ export function getItem(key: string): string | null {
 export function setItem(key: string, value: string): void {
   try {
     const encoded = encodeURIComponent(value);
-    document.cookie = `${key}=${encoded}; path=/; max-age=${ONE_YEAR_SECONDS}; SameSite=Lax`;
+    document.cookie = `${key}=${encoded}${getCookieDomain()}; path=/; max-age=${ONE_YEAR_SECONDS}; SameSite=Lax`;
   } catch (e) {
     // Cookie not available
   }
@@ -38,7 +45,7 @@ export function setItem(key: string, value: string): void {
  */
 export function removeItem(key: string): void {
   try {
-    document.cookie = `${key}=; path=/; max-age=0`;
+    document.cookie = `${key}=${getCookieDomain()}; path=/; max-age=0`;
   } catch (e) {
     // Cookie not available
   }

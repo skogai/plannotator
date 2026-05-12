@@ -41,7 +41,7 @@ export interface RoomDurableState {
   earliestRetainedSeq: number;
   snapshotCiphertext?: string;
   snapshotSeq?: number;
-  expiresAt: number;
+  expiresAt: number | null;
 }
 
 /**

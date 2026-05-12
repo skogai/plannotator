@@ -193,7 +193,7 @@ export function useStartLiveRoom({
           annotations: roomAnnotations,
         },
         user: {
-          id: submit.displayName,
+          id: crypto.randomUUID(),
           name: submit.displayName,
           color: submit.color,
         },

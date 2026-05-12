@@ -118,7 +118,7 @@ export class RoomDurableObject extends DurableObject<Env> {
     }
 
     const expiryDays = clampExpiryDays(body.expiresInDays);
-    const expiresAt = Date.now() + expiryDays * 24 * 60 * 60 * 1000;
+    const expiresAt = expiryDays !== null ? Date.now() + expiryDays * 24 * 60 * 60 * 1000 : null;
 
     const state: RoomDurableState = {
       roomId: body.roomId,
@@ -138,15 +138,15 @@ export class RoomDurableObject extends DurableObject<Env> {
       return Response.json({ error: 'Failed to store room state' }, { status: 507 });
     }
 
-    // Schedule the 30-day (or whatever expiryDays clamps to) auto-purge.
+    // Schedule auto-purge alarm. Skipped for "never" rooms (expiresAt null).
     // `setAlarm` overwrites any pending alarm, which is what we want if
     // this create supplanted an expired-but-alarm-less room above.
-    try {
-      await this.ctx.storage.setAlarm(expiresAt);
-    } catch (e) {
-      // Non-fatal: lazy-expiry in checkRoomLifecycle + the defense-in-depth
-      // check above still catch overdue rooms. Log and carry on.
-      safeLog('room:set-alarm-error', { roomId: body.roomId, error: String(e) });
+    if (expiresAt !== null) {
+      try {
+        await this.ctx.storage.setAlarm(expiresAt);
+      } catch (e) {
+        safeLog('room:set-alarm-error', { roomId: body.roomId, error: String(e) });
+      }
     }
 
     const base = new URL(this.env.BASE_URL || 'https://room.plannotator.ai');

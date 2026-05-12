@@ -144,8 +144,8 @@ describe('clampExpiryDays', () => {
     expect(clampExpiryDays(undefined)).toBe(30);
   });
 
-  test('clamps 0 to 1', () => {
-    expect(clampExpiryDays(0)).toBe(1);
+  test('0 means never (null)', () => {
+    expect(clampExpiryDays(0)).toBe(null);
   });
 
   test('clamps negative to 1', () => {
@@ -176,6 +176,10 @@ describe('hasRoomExpired', () => {
 
   test('returns true after expiry', () => {
     expect(hasRoomExpired(2_000, 2_001)).toBe(true);
+  });
+
+  test('returns false when expiresAt is null (never)', () => {
+    expect(hasRoomExpired(null)).toBe(false);
   });
 });
 

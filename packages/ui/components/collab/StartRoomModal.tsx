@@ -25,7 +25,7 @@ import { PRESENCE_SWATCHES } from '@plannotator/ui/utils/presenceColor';
 export interface StartRoomSubmit {
   displayName: string;
   color: string;
-  expiresInDays: 1 | 7 | 30;
+  expiresInDays: 0 | 1 | 7 | 30;
 }
 
 export interface StartRoomModalProps {
@@ -49,7 +49,7 @@ export function StartRoomModal({
 }: StartRoomModalProps): React.ReactElement {
   const [displayName, setDisplayName] = useState(initialDisplayName);
   const [color, setColor] = useState(initialColor);
-  const [expiresInDays, setExpiresInDays] = useState<1 | 7 | 30>(7);
+  const [expiresInDays, setExpiresInDays] = useState<0 | 1 | 7 | 30>(7);
 
   const strips = imageAnnotationsToStrip > 0;
   const ctaLabel = inFlight
@@ -115,13 +115,14 @@ export function StartRoomModal({
           <label className="text-xs font-medium uppercase text-muted-foreground">Expires</label>
           <select
             value={expiresInDays}
-            onChange={e => setExpiresInDays(Number(e.target.value) as 1 | 7 | 30)}
+            onChange={e => setExpiresInDays(Number(e.target.value) as 0 | 1 | 7 | 30)}
             disabled={inFlight}
             className="w-full px-2 py-1 border rounded text-sm"
           >
             <option value={1}>1 day</option>
             <option value={7}>7 days (default)</option>
             <option value={30}>30 days</option>
+            <option value={0}>Never</option>
           </select>
         </div>
 
