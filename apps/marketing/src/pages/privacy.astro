@@ -12,14 +12,15 @@ import Footer from '../components/Footer.astro';
     <div class="max-w-3xl mx-auto px-8 pt-20 pb-16">
       <article class="prose">
         <h1>Privacy Policy</h1>
-        <p class="text-sm text-muted-foreground">Last updated: April 15, 2026</p>
+        <p class="text-sm text-muted-foreground">Last updated: May 12, 2026</p>
 
         <p>Plannotator is a local-first, open source project. The core Plannotator experience runs on your machine.</p>
         <p>This Privacy Policy explains what data may be processed when you use:</p>
         <ul>
           <li><a href="https://plannotator.ai">https://plannotator.ai</a></li>
           <li><a href="https://share.plannotator.ai">https://share.plannotator.ai</a></li>
-          <li>any hosted sharing or short-link services we operate</li>
+          <li><a href="https://room.plannotator.ai">https://room.plannotator.ai</a></li>
+          <li>any hosted sharing, collaboration, or short-link services we operate</li>
         </ul>
 
         <h2>1. Contact</h2>
@@ -29,7 +30,7 @@ import Footer from '../components/Footer.astro';
         </p>
 
         <h2>2. What this policy covers</h2>
-        <p>This policy covers our website and hosted sharing services.</p>
+        <p>This policy covers our website, hosted sharing services, and live collaboration rooms.</p>
         <p>This policy does <strong>not</strong> cover:</p>
         <ul>
           <li>your local use of Plannotator on your own machine, except when you choose to use our hosted sharing features</li>
@@ -47,6 +48,14 @@ import Footer from '../components/Footer.astro';
           <li>if you self-host the sharing services, your deployment is separate from ours</li>
         </ul>
 
+        <p>For live collaboration rooms:</p>
+        <ul>
+          <li>room content (plans and annotations) is end-to-end encrypted on your device before it reaches the server</li>
+          <li>the server stores and relays ciphertext only — it cannot read your plans, annotations, or presence data</li>
+          <li>encryption keys are held in the URL fragment, which is never sent to the server</li>
+          <li>rooms are deleted automatically after their chosen expiry period, or manually by the room creator at any time</li>
+        </ul>
+
         <h2>4. What we collect</h2>
         <p>We try to collect as little as possible.</p>
 
@@ -55,11 +64,17 @@ import Footer from '../components/Footer.astro';
         <p>We do not store unencrypted shared plan contents through that flow.</p>
         <p>We do not store the decryption key. Because the key is not stored by our hosted service, we cannot access the unencrypted contents of shared plans through this flow.</p>
 
-        <h3>b. Basic infrastructure data</h3>
+        <h3>b. Live collaboration room data</h3>
+        <p>When you create or join a live collaboration room, the server stores encrypted room state (plan content, annotations, and real-time events) so that participants can collaborate. All encryption and decryption happens on your device.</p>
+        <p>We do not have access to the encryption keys. We cannot read the contents of your plans, annotations, or presence information.</p>
+        <p>Display names and colors chosen for room participation are transmitted as encrypted presence data. We do not collect or store them in plaintext.</p>
+        <p>Room data is deleted automatically when the room expires, or immediately when the room creator deletes it.</p>
+
+        <h3>c. Basic infrastructure data</h3>
         <p>Our hosted services rely on infrastructure providers such as AWS, CloudFront, and Cloudflare. As a result, limited technical data such as IP addresses or request metadata may be processed by those providers as part of delivering the service.</p>
         <p>We have configured logging services to be turned off to the extent supported by those providers and services.</p>
 
-        <h3>c. Contact information</h3>
+        <h3>d. Contact information</h3>
         <p>If you contact us directly, we may receive your email address and the contents of your message.</p>
 
         <h2>5. What we do not collect</h2>
@@ -77,8 +92,9 @@ import Footer from '../components/Footer.astro';
         <h2>7. How we use information</h2>
         <p>We use information only as needed to:</p>
         <ul>
-          <li>serve the website and hosted sharing features</li>
+          <li>serve the website, hosted sharing features, and live collaboration rooms</li>
           <li>deliver shared content through short links</li>
+          <li>relay encrypted room data between participants</li>
           <li>keep the service functioning and secure</li>
           <li>respond to support or contact requests</li>
           <li>comply with legal obligations</li>
@@ -95,6 +111,7 @@ import Footer from '../components/Footer.astro';
 
         <h2>9. Retention</h2>
         <p>Encrypted shared payloads are retained only as long as needed for the hosted sharing flow to work.</p>
+        <p>Encrypted room data is retained until the room expires or is deleted by the room creator, whichever comes first.</p>
         <p>Contact emails or support messages may be retained as needed to respond to you and keep basic records of those conversations.</p>
         <p>We may retain information longer if required for security, abuse prevention, or legal compliance.</p>
 

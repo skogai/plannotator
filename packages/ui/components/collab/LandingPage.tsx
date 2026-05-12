@@ -460,11 +460,14 @@ export function LandingPage(): React.ReactElement {
                 </form>
                 </div>
               {/* Trust footer */}
-              <div className="text-center px-6 pb-4 pt-2">
+              <div className="text-center px-6 pb-4 pt-2 space-y-1">
                 <p className="text-xs text-muted-foreground/50">
-                  All content is encrypted on your device before it leaves the browser.
-                  The server stores ciphertext only. Rooms are permanently deleted after expiration.
+                  All content is end-to-end encrypted on your device. The server only stores ciphertext.
+                  Rooms are deleted after their expiry period, or by the creator at any time.
                 </p>
+                <a href="https://plannotator.ai/privacy/" target="_blank" rel="noopener noreferrer" className="text-[10px] text-muted-foreground/40 hover:text-muted-foreground/60 transition-colors">
+                  Privacy Policy
+                </a>
               </div>
               </div>
             </div>
