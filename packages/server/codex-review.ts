@@ -166,11 +166,23 @@ The finding description should be one paragraph.`;
 export function buildCodexReviewUserMessage(
   patch: string,
   diffType: DiffType,
-  options?: { defaultBranch?: string; hasLocalAccess?: boolean },
+  options?: { defaultBranch?: string; hasLocalAccess?: boolean; prDiffScope?: string },
   prMetadata?: PRMetadata,
 ): string {
   // PR/MR mode — pass the link, with local context if --local
   if (prMetadata) {
+    if (options?.prDiffScope === "full-stack") {
+      return [
+        `Full-stack review of ${prMetadata.url}`,
+        "",
+        "This is a stacked PR. The diff below shows ALL accumulated changes from the repository default branch through this PR's head (not just this PR's own layer).",
+        "Review the complete diff for issues that span the stack.",
+        "",
+        "```diff",
+        patch,
+        "```",
+      ].join("\n");
+    }
     if (options?.hasLocalAccess) {
       return [
         prMetadata.url,
@@ -205,6 +217,14 @@ export function buildCodexReviewUserMessage(
       const base = options?.defaultBranch || "main";
       return `Review the code changes against the base branch '${base}'. Run \`git diff ${base}..HEAD\` to inspect the changes. Provide prioritized, actionable findings.`;
     }
+
+    case "merge-base": {
+      const base = options?.defaultBranch || "main";
+      return `Review the PR-style diff against base '${base}'. First find the common ancestor with \`git merge-base ${base} HEAD\`, then run \`git diff <merge-base>..HEAD\` using that commit to inspect only the changes introduced on this branch (matches GitHub's PR view). Provide prioritized, actionable findings.`;
+    }
+
+    case "all":
+      return "Review every file in the repository (all files shown as additions, diffed against an empty tree). Provide prioritized, actionable findings.";
 
     default:
       // p4 or unknown — fall back to generic with inlined diff

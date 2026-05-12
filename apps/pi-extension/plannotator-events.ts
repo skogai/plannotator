@@ -10,6 +10,9 @@ import {
 	openCodeReview,
 	openLastMessageAnnotation,
 	openMarkdownAnnotation,
+	startCodeReviewBrowserSession,
+	startLastMessageAnnotationSession,
+	startMarkdownAnnotationSession,
 	startPlanReviewBrowserSession,
 } from "./plannotator-browser.js";
 
@@ -100,10 +103,16 @@ export interface PlannotatorAnnotatePayload {
 	markdown?: string;
 	mode?: "annotate" | "annotate-folder" | "annotate-last";
 	folderPath?: string;
+	/** Enable review-gate UX (Approve / Annotate / Close), #570 */
+	gate?: boolean;
 }
 
 export interface PlannotatorAnnotationResult {
 	feedback: string;
+	/** True when the reviewer closed the session without providing feedback. */
+	exit?: boolean;
+	/** True when the reviewer clicked Approve in review-gate mode, #570 */
+	approved?: boolean;
 }
 
 export interface PlannotatorArchivePayload {
@@ -266,24 +275,28 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 						request.respond({ status: "error", error: "Missing filePath for annotate request." });
 						return;
 					}
+					const sourceConverted = /\.html?$/i.test(payload.filePath) || /^https?:\/\//i.test(payload.filePath);
 					const result = await openMarkdownAnnotation(
 						ctx,
 						payload.filePath,
 						payload.markdown ?? "",
 						payload.mode ?? "annotate",
 						payload.folderPath,
+						undefined,
+						sourceConverted,
+						payload.gate,
 					);
 					request.respond({ status: "handled", result });
 					return;
 				}
 				case "annotate-last": {
 					const payload = request.payload;
-					const lastText = payload?.markdown?.trim() ? payload.markdown : await getLastAssistantMessageText(ctx);
+					const lastText = payload?.markdown?.trim() ? payload.markdown : getLastAssistantMessageText(ctx);
 					if (!lastText) {
 						request.respond({ status: "unavailable", error: "No assistant message found in session." });
 						return;
 					}
-					const result = await openLastMessageAnnotation(ctx, lastText);
+					const result = await openLastMessageAnnotation(ctx, lastText, payload?.gate);
 					request.respond({ status: "handled", result });
 					return;
 				}
@@ -308,6 +321,9 @@ export {
 	getLastAssistantMessageText,
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
+	startCodeReviewBrowserSession,
+	startLastMessageAnnotationSession,
+	startMarkdownAnnotationSession,
 	getStartupErrorMessage,
 	openArchiveBrowserAction,
 	openCodeReview,

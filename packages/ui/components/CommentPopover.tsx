@@ -7,7 +7,9 @@ import { useDraggable } from '../hooks/useDraggable';
 
 interface CommentPopoverProps {
   /** Element to anchor the popover near (re-reads position on scroll) */
-  anchorEl: HTMLElement;
+  anchorEl?: HTMLElement;
+  /** Static viewport rect to anchor near when no stable DOM element exists */
+  anchorRect?: DOMRect;
   /** Truncated selected text shown in header, or empty for global */
   contextText: string;
   /** Whether this is a global comment */
@@ -48,6 +50,7 @@ function computePosition(anchorRect: DOMRect): { top: number; left: number; flip
 
 export const CommentPopover: React.FC<CommentPopoverProps> = ({
   anchorEl,
+  anchorRect,
   contextText,
   isGlobal,
   initialText = '',
@@ -64,7 +67,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   const { dragPosition, dragHandleProps, wasDragged, reset: resetDrag } = useDraggable(popoverRef);
 
   // Reset drag when anchor changes (new annotation) or mode switches
-  useEffect(() => { resetDrag(); }, [anchorEl, resetDrag]);
+  useEffect(() => { resetDrag(); }, [anchorEl, anchorRect, resetDrag]);
   useEffect(() => { if (mode === 'popover') resetDrag(); }, [mode, resetDrag]);
 
   // Track anchor position on scroll/resize (popover mode only, not after user drag)
@@ -72,7 +75,8 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     if (mode !== 'popover' || wasDragged) return;
 
     const update = () => {
-      setPosition(computePosition(anchorEl.getBoundingClientRect()));
+      const rect = anchorEl?.getBoundingClientRect() ?? anchorRect;
+      if (rect) setPosition(computePosition(rect));
     };
 
     update();
@@ -82,7 +86,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       window.removeEventListener('scroll', update, true);
       window.removeEventListener('resize', update);
     };
-  }, [anchorEl, mode, wasDragged]);
+  }, [anchorEl, anchorRect, mode, wasDragged]);
 
   // Focus textarea on mount and mode changes
   useEffect(() => {

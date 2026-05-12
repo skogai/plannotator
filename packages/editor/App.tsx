@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
-import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter } from '@plannotator/ui/utils/parser';
+import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry } from '@plannotator/ui/utils/parser';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { ExportModal } from '@plannotator/ui/components/ExportModal';
 import { ImportModal } from '@plannotator/ui/components/ImportModal';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
-import { Annotation, Block, EditorMode, type InputMethod, type ImageAttachment, type ActionsLabelMode } from '@plannotator/ui/types';
+import { Annotation, Block, EditorMode, type CodeAnnotation, type InputMethod, type ImageAttachment, type ActionsLabelMode } from '@plannotator/ui/types';
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { Tooltip, TooltipProvider } from '@plannotator/ui/components/Tooltip';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
@@ -15,6 +15,7 @@ import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunnin
 import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup';
 import { Settings } from '@plannotator/ui/components/Settings';
 import { FeedbackButton, ApproveButton, ExitButton } from '@plannotator/ui/components/ToolbarButtons';
+import { ApproveDropdown } from '@plannotator/ui/components/ApproveDropdown';
 import { useSharing } from '@plannotator/ui/hooks/useSharing';
 import { getCallbackConfig, CallbackAction, executeCallback, type ToastPayload } from '@plannotator/ui/utils/callback';
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
@@ -56,6 +57,7 @@ import { deriveImageName } from '@plannotator/ui/components/AttachmentsButton';
 import { useSidebar, type SidebarTab } from '@plannotator/ui/hooks/useSidebar';
 import { usePlanDiff, type VersionInfo } from '@plannotator/ui/hooks/usePlanDiff';
 import { useLinkedDoc } from '@plannotator/ui/hooks/useLinkedDoc';
+import { useCodeFilePopout } from '@plannotator/ui/hooks/useCodeFilePopout';
 import { useAnnotationDraft } from '@plannotator/ui/hooks/useAnnotationDraft';
 import { useArchive } from '@plannotator/ui/hooks/useArchive';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
@@ -68,14 +70,15 @@ import { RoomAdminErrorToast } from '@plannotator/ui/components/collab/RoomAdmin
 import { ImageStripNotice } from '@plannotator/ui/components/collab/ImageStripNotice';
 import { buildPlanAgentInstructions } from '@plannotator/ui/utils/planAgentInstructions';
 import { buildRoomAgentInstructions } from '@plannotator/ui/utils/roomAgentInstructions';
-import { hasNewSettings, markNewSettingsSeen } from '@plannotator/ui/utils/newSettingsHint';
 import { useFileBrowser } from '@plannotator/ui/hooks/useFileBrowser';
 import { isVaultBrowserEnabled } from '@plannotator/ui/utils/obsidian';
 import { isFileBrowserEnabled, getFileBrowserSettings } from '@plannotator/ui/utils/fileBrowser';
+import { generateId } from '@plannotator/ui/utils/generateId';
 import { SidebarTabs } from '@plannotator/ui/components/sidebar/SidebarTabs';
 import { SidebarContainer } from '@plannotator/ui/components/sidebar/SidebarContainer';
 import type { ArchivedPlan } from '@plannotator/ui/components/sidebar/ArchiveBrowser';
 import { PlanDiffViewer } from '@plannotator/ui/components/plan-diff/PlanDiffViewer';
+import { CodeFilePopout, type CodeFileAnnotationInput } from '@plannotator/ui/components/CodeFilePopout';
 import type { PlanDiffMode } from '@plannotator/ui/components/plan-diff/PlanDiffModeSwitcher';
 // Demo content toggle. Default: the original Real-time Collaboration plan.
 // Opt-in diff-engine stress test: `VITE_DIFF_DEMO=1 bun run dev:hook` swaps
@@ -102,17 +105,6 @@ type NoteAutoSaveResults = {
 };
 
 export interface AppProps {
-  /**
-   * When provided, the editor runs in room mode: annotation mutations
-   * route through the room client and the `/api/plan` fetch is
-   * skipped (the plan arrives from the encrypted room snapshot
-   * instead). Approve and Deny are local-only — they are never
-   * offered in room mode — so passing this prop does not change the
-   * approve/deny flow.
-   *
-   * AppRoot is the only caller that should pass this; plain
-   * consumers mounting `<App />` get local mode unchanged.
-   */
   roomSession?: import('@plannotator/ui/hooks/collab/useCollabRoomSession').UseCollabRoomSessionReturn;
 }
 
@@ -122,19 +114,8 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
     roomModeActive ? '' : DEMO_PLAN_CONTENT,
   );
 
-  // Room admin action (delete). Pending + error state live here (not
-  // in `RoomApp`) because the control renders in the editor header
-  // alongside everything else App owns. The error slot is surfaced
-  // via a toast at the bottom of the layout.
   const roomAdmin = useRoomAdminActions(roomSession?.room);
 
-  // Stripped-image handoff count from the creator-origin fragment
-  // (`&stripped=N`). AppRoot reads and strips the fragment param on
-  // mount, stashing the number on `window.__PLANNOTATOR_STRIPPED_IMAGES__`.
-  // The initializer is PURE; the consume-once effect below clears the
-  // global so a later App remount doesn't re-show the notice. Pattern
-  // matches the previous RoomApp implementation — see its commit
-  // history for the StrictMode double-run trap this avoids.
   const [strippedImagesCount, setStrippedImagesCount] = useState<number>(() => {
     if (!roomModeActive || typeof window === 'undefined') return 0;
     const w = window as { __PLANNOTATOR_STRIPPED_IMAGES__?: number };
@@ -147,14 +128,7 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
       delete w.__PLANNOTATOR_STRIPPED_IMAGES__;
     }
   }, []);
-  // Annotation state lives behind a uniform controller. In local mode it
-  // wraps useState; in room mode it delegates to useCollabRoom, with
-  // `pending` tracking sends awaiting echo and `failed` holding ids whose
-  // last send rejected. `setAnnotations` is retained as a name pointing at
-  // `controller.setAll` — undefined in room mode, so the few downstream
-  // consumers that ATOMIC-replace (useSharing import, draft restore, linked
-  // doc switch) degrade to no-ops in room mode. Those flows are not
-  // supported inside a live room.
+
   const annotationController = useAnnotationController({
     initial: [],
     room: roomSession?.room,
@@ -162,18 +136,10 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
   const { annotations } = annotationController;
   const setAnnotations: React.Dispatch<React.SetStateAction<Annotation[]>> =
     annotationController.setAll ??
-    ((_: React.SetStateAction<Annotation[]>) => {
-      // In room mode the controller has no replace-all primitive. Silently
-      // drop — every caller that relies on atomic replace is already
-      // guarded upstream (share import is disabled in room mode; draft
-      // restore triggers only in local mode; linked doc switch exits room
-      // mode first).
-    });
+    ((_: React.SetStateAction<Annotation[]>) => {});
 
-  // Sync the plan markdown from the encrypted room snapshot. `room.planMarkdown`
-  // is empty string until the snapshot decrypts; we only overwrite local
-  // markdown when we have non-empty room plan content, so a late snapshot
-  // doesn't clobber the initial empty string render noisily.
+  const [codeAnnotations, setCodeAnnotations] = useState<CodeAnnotation[]>([]);
+
   useEffect(() => {
     if (!roomSession?.room) return;
     const plan = roomSession.room.planMarkdown;
@@ -181,6 +147,7 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomSession?.room?.planMarkdown]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
+  const [selectedCodeAnnotationId, setSelectedCodeAnnotationId] = useState<string | null>(null);
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [frontmatter, setFrontmatter] = useState<Frontmatter | null>(null);
   const [showExport, setShowExport] = useState(false);
@@ -188,11 +155,12 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
   const [showClaudeCodeWarning, setShowClaudeCodeWarning] = useState(false);
   const [showExitWarning, setShowExitWarning] = useState(false);
+  // When the warning dialog confirms, route to the handler matching the button that opened it.
+  const [exitWarningAction, setExitWarningAction] = useState<'close' | 'approve'>('close');
   const [showAgentWarning, setShowAgentWarning] = useState(false);
   const [agentWarningMessage, setAgentWarningMessage] = useState('');
   const [isPanelOpen, setIsPanelOpen] = useState(() => window.innerWidth >= 768);
   const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
-  const [hasNewSettingsHints, setHasNewSettingsHints] = useState(() => hasNewSettings());
   const [editorMode, setEditorMode] = useState<EditorMode>(getEditorMode);
   const [inputMethod, setInputMethod] = useState<InputMethod>(getInputMethod);
   const [taterMode, setTaterMode] = useState(() => {
@@ -245,8 +213,10 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
   const [isWSL, setIsWSL] = useState(false);
   const [globalAttachments, setGlobalAttachments] = useState<ImageAttachment[]>([]);
   const [annotateMode, setAnnotateMode] = useState(false);
+  const [gate, setGate] = useState(false);
   const [annotateSource, setAnnotateSource] = useState<'file' | 'message' | 'folder' | null>(null);
   const [sourceInfo, setSourceInfo] = useState<string | undefined>();
+  const [sourceConverted, setSourceConverted] = useState(false);
   const [sourceFilePath, setSourceFilePath] = useState<string | undefined>();
   const [imageBaseDir, setImageBaseDir] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
@@ -341,6 +311,14 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
   // Sidebar (shared TOC + Version Browser)
   const sidebar = useSidebar(getUIPreferences().tocEnabled);
 
+  // Whether the document has any TOC-eligible headings (level <= 3, matching
+  // buildTocHierarchy). Drives the empty-doc auto-close behavior below — must
+  // be declared before the effects that reference it (TDZ in dep arrays).
+  const hasTocEntries = useMemo(
+    () => blocks.some(b => b.type === 'heading' && (b.level ?? 0) <= 3),
+    [blocks]
+  );
+
   const exitWideMode = useCallback((options?: {
     restore?: boolean;
     sidebarTab?: SidebarTab;
@@ -399,9 +377,22 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
     if (wideModeType !== null) return;
     if (lastAppliedTocEnabledRef.current === uiPrefs.tocEnabled) return;
     lastAppliedTocEnabledRef.current = uiPrefs.tocEnabled;
-    if (uiPrefs.tocEnabled) sidebar.open('toc');
-    else sidebar.close();
-  }, [wideModeType, sidebar.close, sidebar.open, uiPrefs.tocEnabled]);
+    if (uiPrefs.tocEnabled && hasTocEntries) sidebar.open('toc');
+    else if (!uiPrefs.tocEnabled) sidebar.close();
+  }, [wideModeType, sidebar.close, sidebar.open, uiPrefs.tocEnabled, hasTocEntries]);
+
+  // Auto-close the sidebar when blocks parse with no TOC entries. Fires
+  // only on blocks/hasTocEntries change (not on sidebar state) so a user
+  // who manually re-opens the empty sidebar is left alone — until the
+  // document changes again (e.g. picking a new file in annotate-folder).
+  useEffect(() => {
+    if (blocks.length === 0) return;
+    if (hasTocEntries) return;
+    if (sidebar.activeTab === 'toc' && sidebar.isOpen) {
+      sidebar.close();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocks, hasTocEntries]);
 
   // Clear diff view when switching away from versions tab
   useEffect(() => {
@@ -441,7 +432,19 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
   const linkedDocHook = useLinkedDoc({
     markdown, annotations, selectedAnnotationId, globalAttachments,
     setMarkdown, setAnnotations, setSelectedAnnotationId, setGlobalAttachments,
-    viewerRef, sidebar: linkedDocSidebar, sourceFilePath,
+    viewerRef, sidebar: linkedDocSidebar, sourceFilePath, sourceConverted,
+  });
+
+  // Code file popout (read-only syntax-highlighted overlay)
+  const codeFilePopout = useCodeFilePopout({
+    buildUrl: useCallback((codePath: string) => {
+      const baseDir = linkedDocHook.filepath
+        ? linkedDocHook.filepath.replace(/\/[^/]+$/, '')
+        : imageBaseDir?.includes('/') ? imageBaseDir : undefined;
+      return baseDir
+        ? `/api/doc?path=${encodeURIComponent(codePath)}&base=${encodeURIComponent(baseDir)}`
+        : `/api/doc?path=${encodeURIComponent(codePath)}`;
+    }, [linkedDocHook.filepath, imageBaseDir]),
   });
 
   // Archive browser
@@ -556,7 +559,7 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
       // Pass the current file's directory as base for relative path resolution
       const baseDir = linkedDocHook.filepath
         ? linkedDocHook.filepath.replace(/\/[^/]+$/, '')
-        : imageBaseDir;
+        : imageBaseDir?.includes('/') ? imageBaseDir : undefined;
       if (baseDir) {
         linkedDocHook.open(docPath, (path) =>
           `/api/doc?path=${encodeURIComponent(path)}&base=${encodeURIComponent(baseDir)}`
@@ -687,6 +690,25 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
   // Plan diff state — memoize filtered annotation lists to avoid new references per render
   const diffAnnotations = useMemo(() => allAnnotations.filter(a => !!a.diffContext), [allAnnotations]);
   const viewerAnnotations = useMemo(() => allAnnotations.filter(a => !a.diffContext), [allAnnotations]);
+  // Any-annotations flag used by Close/Approve/Send guards. Consolidates the
+  // four-term check that was inlined across the annotate-mode header + keyboard paths.
+  const hasAnyAnnotations = useMemo(
+    () => allAnnotations.length > 0
+      || codeAnnotations.length > 0
+      || editorAnnotations.length > 0
+      || linkedDocHook.docAnnotationCount > 0
+      || globalAttachments.length > 0,
+    [allAnnotations.length, codeAnnotations.length, editorAnnotations.length, linkedDocHook.docAnnotationCount, globalAttachments.length],
+  );
+  const feedbackAnnotationCount =
+    allAnnotations.length +
+    codeAnnotations.length +
+    editorAnnotations.length +
+    linkedDocHook.docAnnotationCount +
+    globalAttachments.length;
+  // Code-file comments are intentionally not serialized into share URLs in v1.
+  // Hide share entry points once they exist so we do not silently drop feedback.
+  const canShareCurrentSession = sharingEnabled && !roomModeActive && codeAnnotations.length === 0;
 
   // URL-based sharing
   const {
@@ -726,6 +748,7 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
   // Auto-save annotation drafts
   const { draftBanner, restoreDraft, dismissDraft } = useAnnotationDraft({
     annotations: allAnnotations,
+    codeAnnotations,
     globalAttachments,
     isApiMode,
     isSharedSession,
@@ -733,15 +756,11 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
   });
 
   const handleRestoreDraft = React.useCallback(() => {
-    // Draft restore is a replace-all flow; in room mode the room-backed
-    // controller has no replace-all primitive (annotations are
-    // server-authoritative). We intentionally skip restore in room mode —
-    // the user's local draft is still on disk; they can apply it after
-    // leaving the room.
     if (roomModeActive) return;
-    const { annotations: restored, globalAttachments: restoredGlobal } = restoreDraft();
-    if (restored.length > 0) {
+    const { annotations: restored, codeAnnotations: restoredCode, globalAttachments: restoredGlobal } = restoreDraft();
+    if (restored.length > 0 || restoredCode.length > 0 || restoredGlobal.length > 0) {
       setAnnotations(restored);
+      setCodeAnnotations(restoredCode);
       if (restoredGlobal.length > 0) setGlobalAttachments(restoredGlobal);
       // Apply highlights to DOM after a tick
       setTimeout(() => {
@@ -816,7 +835,7 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive'; filePath?: string; sourceInfo?: string; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string } }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive'; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; gate?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string } }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         // gitUser drives the "Use git name" button in Settings; stays undefined (button hidden) when unavailable
@@ -837,6 +856,7 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
         setIsApiMode(true);
         if (data.mode === 'annotate' || data.mode === 'annotate-last' || data.mode === 'annotate-folder') {
           setAnnotateMode(true);
+          setGate(data.gate ?? false);
         }
         if (data.mode === 'annotate-folder') {
           sidebar.open('files');
@@ -845,6 +865,7 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
           setAnnotateSource(data.mode === 'annotate-last' ? 'message' : data.mode === 'annotate-folder' ? 'folder' : 'file');
         }
         setSourceInfo(data.sourceInfo ?? undefined);
+        setSourceConverted(!!data.sourceConverted);
         if (data.filePath) {
           setImageBaseDir(data.mode === 'annotate-folder' ? data.filePath : data.filePath.replace(/\/[^/]+$/, ''));
           if (data.mode === 'annotate') {
@@ -1056,7 +1077,6 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
       const obsidianSettings = getObsidianSettings();
       const bearSettings = getBearSettings();
       const octarineSettings = getOctarineSettings();
-      const agentSwitchSettings = getAgentSwitchSettings();
       const planSaveSettings = getPlanSaveSettings();
       const autoSaveResults = bearSettings.autoSave && autoSavePromiseRef.current
         ? await autoSavePromiseRef.current
@@ -1070,8 +1090,7 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
         body.permissionMode = permissionMode;
       }
 
-      // Include agent switch setting for OpenCode (effective name handles custom agents)
-      const effectiveAgent = getEffectiveAgentName(agentSwitchSettings);
+      const effectiveAgent = getEffectiveAgentName(getAgentSwitchSettings());
       if (effectiveAgent) {
         body.agentSwitch = effectiveAgent;
       }
@@ -1115,7 +1134,7 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
       const hasDocAnnotations = Array.from(linkedDocHook.getDocAnnotations().values()).some(
         (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
       );
-      if (allAnnotations.length > 0 || globalAttachments.length > 0 || hasDocAnnotations || editorAnnotations.length > 0) {
+      if (allAnnotations.length > 0 || codeAnnotations.length > 0 || globalAttachments.length > 0 || hasDocAnnotations || editorAnnotations.length > 0) {
         body.feedback = annotationsOutput;
       }
 
@@ -1223,9 +1242,21 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
         body: JSON.stringify({
           feedback: annotationsOutput,
           annotations: allAnnotations,
+          codeAnnotations,
         }),
       });
       setSubmitted('denied'); // reuse 'denied' state for "feedback sent" overlay
+    } catch {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Annotate gate-mode handler — approves the artifact without feedback (#570)
+  const handleAnnotateApprove = async () => {
+    setIsSubmitting(true);
+    try {
+      await fetch('/api/approve', { method: 'POST' });
+      setSubmitted('approved');
     } catch {
       setIsSubmitting(false);
     }
@@ -1271,8 +1302,13 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
 
       e.preventDefault();
 
-      // Annotate mode: always send feedback (empty = "no feedback" message)
+      // Annotate mode: gate-enabled + no annotations → approve (empty stdout).
+      // Otherwise: send feedback.
       if (annotateMode) {
+        if (gate && !hasAnyAnnotations) {
+          handleAnnotateApprove();
+          return;
+        }
         handleAnnotateFeedback();
         return;
       }
@@ -1282,7 +1318,7 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
       const hasDocAnnotations = Array.from(docAnnotations.values()).some(
         (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
       );
-      if (allAnnotations.length === 0 && editorAnnotations.length === 0 && !hasDocAnnotations) {
+      if (allAnnotations.length === 0 && codeAnnotations.length === 0 && editorAnnotations.length === 0 && !hasDocAnnotations) {
         // Check if agent exists for OpenCode users
         if (origin === 'opencode') {
           const warning = getAgentWarning();
@@ -1303,13 +1339,15 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
   }, [
     showExport, showImport, showFeedbackPrompt, showClaudeCodeWarning, showExitWarning, showAgentWarning,
     showPermissionModeSetup, pendingPasteImage,
-    submitted, isSubmitting, isExiting, isApiMode, linkedDocHook.isActive, annotations.length, externalAnnotations.length, annotateMode,
+    submitted, isSubmitting, isExiting, isApiMode, linkedDocHook.isActive, annotations.length, codeAnnotations.length, externalAnnotations.length, annotateMode,
+    gate, hasAnyAnnotations,
     origin, getAgentWarning,
   ]);
 
   const handleAddAnnotation = (ann: Annotation) => {
     annotationController.add(ann);
     setSelectedAnnotationId(ann.id);
+    setSelectedCodeAnnotationId(null);
     if (wideModeType === null) {
       setIsPanelOpen(true);
     }
@@ -1318,19 +1356,50 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
   // Keep selection behavior explicit across mobile/wide-mode transitions.
   const handleSelectAnnotation = React.useCallback((id: string | null) => {
     setSelectedAnnotationId(id);
+    if (id) setSelectedCodeAnnotationId(null);
     if (id && isMobile && wideModeType === null) setIsPanelOpen(true);
   }, [isMobile, wideModeType]);
 
-  // Core annotation removal — highlight cleanup + controller filter + selection clear.
-  //
-  // Local mode: remove the highlight immediately (optimistic). The user
-  // sees instant feedback and there's no server to reject.
-  //
-  // Room mode: do NOT remove the highlight before the server echo. The
-  // room annotation reconciliation effect (above) removes marks when
-  // they disappear from canonical state. Removing early would desync
-  // the DOM if the server rejects: the annotation would stay canonical
-  // but lose its visible mark.
+  const handleAddCodeAnnotation = React.useCallback((input: CodeFileAnnotationInput) => {
+    const annotation: CodeAnnotation = {
+      id: generateId('code-ann'),
+      type: 'comment',
+      scope: 'line',
+      filePath: input.filePath,
+      lineStart: input.lineStart,
+      lineEnd: input.lineEnd,
+      side: 'new',
+      text: input.text,
+      images: input.images,
+      originalCode: input.originalCode,
+      createdAt: Date.now(),
+      author: configStore.get('displayName') || undefined,
+    };
+    setCodeAnnotations(prev => [...prev, annotation]);
+    setSelectedAnnotationId(null);
+    setSelectedCodeAnnotationId(annotation.id);
+    if (wideModeType === null) {
+      setIsPanelOpen(true);
+    }
+  }, [wideModeType]);
+
+  const handleSelectCodeAnnotation = React.useCallback((id: string) => {
+    const annotation = codeAnnotations.find(a => a.id === id);
+    if (!annotation) return;
+    setSelectedAnnotationId(null);
+    setSelectedCodeAnnotationId(id);
+    codeFilePopout.open(annotation.filePath);
+    if (isMobile && wideModeType === null) setIsPanelOpen(true);
+  }, [codeAnnotations, codeFilePopout.open, isMobile, wideModeType]);
+
+  const handleDeleteCodeAnnotation = React.useCallback((id: string) => {
+    setCodeAnnotations(prev => prev.filter(a => a.id !== id));
+    if (selectedCodeAnnotationId === id) setSelectedCodeAnnotationId(null);
+  }, [selectedCodeAnnotationId]);
+
+  const handleEditCodeAnnotation = React.useCallback((id: string, updates: Partial<CodeAnnotation>) => {
+    setCodeAnnotations(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
+  }, []);
   const removeAnnotation = (id: string) => {
     if (!roomModeActive) {
       viewerRef.current?.removeHighlight(id);
@@ -1404,23 +1473,15 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
   };
 
   const handleIdentityChange = (oldIdentity: string, newIdentity: string) => {
-    // In room mode the joined identity — which stamps new annotations,
-    // labels remote cursors, and keyed presence — is owned by `RoomApp`
-    // and was confirmed at the join gate. Rewriting old annotations
-    // from here while that live identity stays on the prior name
-    // produces a "split" participant: old rows now say "Alice" but
-    // future rows / the cursor flag still say "Bob." Skip rewrites
-    // inside a room. Updating the Settings display name still takes
-    // effect locally and on subsequent rooms; a deliberate live
-    // rename feature (update presence + rename server-side) would be
-    // a RoomApp-owned feature, not a half-rewrite from here.
     if (roomModeActive) return;
-    // Identity-rename is a bulk update across all matching annotations.
     for (const ann of annotations) {
       if (ann.author === oldIdentity) {
         annotationController.update(ann.id, { author: newIdentity });
       }
     }
+    setCodeAnnotations(prev => prev.map(ann =>
+      ann.author === oldIdentity ? { ...ann, author: newIdentity } : ann
+    ));
   };
 
   const handleAddGlobalAttachment = (image: ImageAttachment) => {
@@ -1449,27 +1510,56 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
     const effectiveGlobalAttachments = roomModeActive ? [] : globalAttachments;
     const hasPlanAnnotations = allAnnotations.length > 0 || effectiveGlobalAttachments.length > 0;
     const hasEditorAnnotations = editorAnnotations.length > 0;
+    const hasCodeAnnotations = codeAnnotations.length > 0;
 
-    if (!hasPlanAnnotations && !hasDocAnnotations && !hasEditorAnnotations) {
+    if (!hasPlanAnnotations && !hasDocAnnotations && !hasEditorAnnotations && !hasCodeAnnotations) {
       return 'User reviewed the document and has no feedback.';
     }
 
+    // Derive the conversion flag for the currently-displayed document:
+    // when viewing a linked doc, use that doc's isConverted; otherwise use the root flag.
+    const activeConverted = linkedDocHook.isActive
+      ? (docAnnotations.get(linkedDocHook.filepath ?? '')?.isConverted ?? false)
+      : sourceConverted;
+
     let output = hasPlanAnnotations
-      ? exportAnnotations(blocks, allAnnotations, effectiveGlobalAttachments, annotateSource === 'message' ? 'Message Feedback' : annotateSource === 'folder' ? 'Folder Feedback' : annotateSource === 'file' ? 'File Feedback' : 'Plan Feedback', annotateSource ?? 'plan')
+      ? exportAnnotations(
+          blocks,
+          allAnnotations,
+          effectiveGlobalAttachments,
+          annotateSource === 'message' ? 'Message Feedback' : annotateSource === 'folder' ? 'Folder Feedback' : annotateSource === 'file' ? 'File Feedback' : 'Plan Feedback',
+          annotateSource ?? 'plan',
+          { sourceConverted: activeConverted },
+        )
       : '';
 
     if (hasDocAnnotations) {
-      output += exportLinkedDocAnnotations(docAnnotations);
+      // Parse blocks for each linked doc's cached markdown so the exporter
+      // can attach source line numbers per annotation.
+      const enriched: Map<string, LinkedDocAnnotationEntry> = new Map(docAnnotations);
+      for (const [filepath, entry] of enriched) {
+        if (entry.markdown) {
+          enriched.set(filepath, { ...entry, blocks: parseMarkdownToBlocks(entry.markdown) });
+        }
+      }
+      output += exportLinkedDocAnnotations(enriched);
     }
 
     if (hasEditorAnnotations) {
       output += exportEditorAnnotations(editorAnnotations);
     }
 
+    if (hasCodeAnnotations) {
+      output += exportCodeFileAnnotations(codeAnnotations);
+    }
+
     return output;
-  }, [blocks, allAnnotations, globalAttachments, roomModeActive, linkedDocHook.getDocAnnotations, editorAnnotations]);
+  }, [blocks, allAnnotations, globalAttachments, roomModeActive, linkedDocHook.getDocAnnotations, editorAnnotations, codeAnnotations, sourceConverted, annotateSource, linkedDocHook.isActive, linkedDocHook.filepath]);
 
   // Bot callback config — read once from URL search params (?cb=&ct=)
+  // TODO: bot callbacks post shareUrl which doesn't include code-file annotations.
+  // If a user adds code comments and hits the callback button, those comments are silently dropped.
+  // Fix: either disable callbacks when codeAnnotations exist, or include annotationsOutput in the payload.
   const callbackConfig = React.useMemo(() => getCallbackConfig(), []);
 
   const callCallback = React.useCallback(async (action: CallbackAction) => {
@@ -1796,14 +1886,22 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
             {approveDenyAvailable && (!linkedDocHook.isActive || annotateMode) && !archive.archiveMode && (
               <>
                 {annotateMode ? (
-                  // Annotate mode: Close always visible, Send Annotations when annotations exist
+                  // Annotate mode: Close always visible, Send Annotations when annotations exist,
+                  // Approve only when gate (review) mode is enabled (#570).
                   <>
                     <ExitButton
-                      onClick={() => (allAnnotations.length > 0 || editorAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0 || globalAttachments.length > 0) ? setShowExitWarning(true) : handleAnnotateExit()}
+                      onClick={() => {
+                        if (hasAnyAnnotations) {
+                          setExitWarningAction('close');
+                          setShowExitWarning(true);
+                        } else {
+                          handleAnnotateExit();
+                        }
+                      }}
                       disabled={isSubmitting || isExiting}
                       isLoading={isExiting}
                     />
-                    {(allAnnotations.length > 0 || editorAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0 || globalAttachments.length > 0) && (
+                    {hasAnyAnnotations && (
                       <FeedbackButton
                         onClick={handleAnnotateFeedback}
                         disabled={isSubmitting || isExiting}
@@ -1821,7 +1919,7 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
                       const hasDocAnnotations = Array.from(docAnnotations.values()).some(
                         (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
                       );
-                      if (allAnnotations.length === 0 && editorAnnotations.length === 0 && !hasDocAnnotations) {
+                      if (allAnnotations.length === 0 && codeAnnotations.length === 0 && editorAnnotations.length === 0 && !hasDocAnnotations) {
                         setShowFeedbackPrompt(true);
                       } else {
                         handleDeny();
@@ -1834,35 +1932,64 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
                   />
                 )}
 
-                {!annotateMode && <div className="relative group/approve">
-                  <ApproveButton
-                    onClick={() => {
-                      if (origin === 'claude-code' && allAnnotations.length > 0) {
-                        setShowClaudeCodeWarning(true);
-                        return;
-                      }
-                      if (origin === 'opencode') {
+                {(!annotateMode || gate) && (
+                  origin === 'opencode' && !annotateMode && availableAgents.length > 0 ? (
+                    <ApproveDropdown
+                      onApprove={() => {
                         const warning = getAgentWarning();
                         if (warning) {
                           setAgentWarningMessage(warning);
                           setShowAgentWarning(true);
                           return;
                         }
-                      }
-                      handleApprove();
-                    }}
-                    disabled={isSubmitting}
-                    isLoading={isSubmitting}
-                    dimmed={(origin === 'claude-code' || origin === 'gemini-cli') && allAnnotations.length > 0}
-                  />
-                  {(origin === 'claude-code' || origin === 'gemini-cli') && allAnnotations.length > 0 && (
-                    <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
-                      <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
-                      <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
-                      {agentName} doesn't support feedback on approval. Your annotations won't be seen.
+                        handleApprove();
+                      }}
+                      agents={availableAgents}
+                      disabled={isSubmitting}
+                      isLoading={isSubmitting}
+                    />
+                  ) : (
+                    <div className="relative group/approve">
+                      <ApproveButton
+                        onClick={() => {
+                          if (annotateMode) {
+                            if (hasAnyAnnotations) {
+                              setExitWarningAction('approve');
+                              setShowExitWarning(true);
+                              return;
+                            }
+                            handleAnnotateApprove();
+                            return;
+                          }
+                          if (origin === 'claude-code' && (allAnnotations.length > 0 || codeAnnotations.length > 0)) {
+                            setShowClaudeCodeWarning(true);
+                            return;
+                          }
+                          if (origin === 'opencode') {
+                            const warning = getAgentWarning();
+                            if (warning) {
+                              setAgentWarningMessage(warning);
+                              setShowAgentWarning(true);
+                              return;
+                            }
+                          }
+                          handleApprove();
+                        }}
+                        disabled={isSubmitting || (annotateMode && isExiting)}
+                        isLoading={isSubmitting}
+                        dimmed={!annotateMode && (origin === 'claude-code' || origin === 'gemini-cli') && (allAnnotations.length > 0 || codeAnnotations.length > 0)}
+                        title={annotateMode ? 'Approve — no changes requested' : undefined}
+                      />
+                      {!annotateMode && (origin === 'claude-code' || origin === 'gemini-cli') && (allAnnotations.length > 0 || codeAnnotations.length > 0) && (
+                        <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
+                          <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
+                          <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
+                          {agentName} doesn't support feedback on approval. Your annotations won't be seen.
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>}
+                  )
+                )}
 
                 <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
               </>
@@ -1932,12 +2059,7 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
 
             <PlanHeaderMenu
               appVersion={typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
-              hasNewSettingsHints={hasNewSettingsHints}
               onOpenSettings={() => {
-                if (hasNewSettingsHints) {
-                  markNewSettingsSeen();
-                  setHasNewSettingsHints(false);
-                }
                 setMobileSettingsOpen(true);
               }}
               onOpenExport={() => { setInitialExportTab(undefined); setShowExport(true); }}
@@ -1950,11 +2072,7 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
               onSaveToObsidian={() => handleQuickSaveToNotes('obsidian')}
               onSaveToBear={() => handleQuickSaveToNotes('bear')}
               onSaveToOctarine={() => handleQuickSaveToNotes('octarine')}
-              // Static share/import is mutually exclusive with room mode.
-              // When joined to a live room, the "Copy Share Link" and
-              // "Import Review" menu items are hidden; "Start live room"
-              // is also hidden since we're already in one.
-              sharingEnabled={sharingEnabled && !roomModeActive}
+              sharingEnabled={canShareCurrentSession}
               isApiMode={isApiMode}
               agentInstructionsEnabled={isApiMode && !archive.archiveMode && !annotateMode}
               obsidianConfigured={isObsidianConfigured()}
@@ -2226,13 +2344,8 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
                   hasPreviousVersion={!linkedDocHook.isActive && planDiff.hasPreviousVersion}
                   showDemoBadge={!isApiMode && !isLoadingShared && !isSharedSession && !roomModeActive}
                   maxWidth={annotateReaderMaxWidth}
-                  // Room mode: disable navigation into local documents.
-                  // The room origin (room.plannotator.ai) has no file
-                  // server, so wikilinks and local `.md` markdown
-                  // links would either 404 on the room origin or
-                  // attempt a broken `/api/doc` fetch. `Viewer`
-                  // renders them as plain text when the flag is false.
                   onOpenLinkedDoc={roomModeActive ? undefined : handleOpenLinkedDoc}
+                  onOpenCodeFile={codeFilePopout.open}
                   localDocLinksEnabled={!roomModeActive}
                   linkedDocInfo={linkedDocHook.isActive ? { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label: fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath)?.isVault ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined, backLabel } : null}
                   imageBaseDir={imageBaseDir}
@@ -2256,11 +2369,15 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
             isOpen={isPanelOpen && wideModeType === null}
             blocks={blocks}
             annotations={allAnnotations}
-            selectedId={selectedAnnotationId}
-            onSelect={setSelectedAnnotationId}
+            selectedId={selectedAnnotationId ?? selectedCodeAnnotationId}
+            onSelect={handleSelectAnnotation}
             onDelete={handleDeleteAnnotation}
             onEdit={handleEditAnnotation}
-            sharingEnabled={sharingEnabled}
+            codeAnnotations={codeAnnotations}
+            onSelectCodeAnnotation={handleSelectCodeAnnotation}
+            onDeleteCodeAnnotation={handleDeleteCodeAnnotation}
+            onEditCodeAnnotation={handleEditCodeAnnotation}
+            sharingEnabled={canShareCurrentSession}
             width={panelResize.width}
             editorAnnotations={editorAnnotations}
             onDeleteEditorAnnotation={deleteEditorAnnotation}
@@ -2268,7 +2385,7 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
             onQuickCopy={async () => {
               await navigator.clipboard.writeText(wrapFeedbackForAgent(annotationsOutput));
             }}
-            onShare={shareUrl ? () => { setIsPanelOpen(false); setInitialExportTab('share'); setShowExport(true); } : undefined}
+            onShare={canShareCurrentSession && shareUrl ? () => { setIsPanelOpen(false); setInitialExportTab('share'); setShowExport(true); } : undefined}
             otherFileAnnotations={otherFileAnnotations}
             onOtherFileAnnotationsClick={handleFlashAnnotatedFiles}
             // Room-mode pending/failed surface. Local mode provides undefined
@@ -2297,6 +2414,22 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
         </div>
         </ScrollViewportContext.Provider>
 
+        {/* Code File Popout */}
+        {codeFilePopout.popoutProps && (
+          <CodeFilePopout
+            {...codeFilePopout.popoutProps}
+            annotations={codeAnnotations.filter((ann) => ann.filePath === codeFilePopout.popoutProps?.filepath)}
+            selectedAnnotationId={selectedCodeAnnotationId}
+            onAddAnnotation={handleAddCodeAnnotation}
+            onEditAnnotation={handleEditCodeAnnotation}
+            onDeleteAnnotation={handleDeleteCodeAnnotation}
+            onSelectAnnotation={(id) => {
+              setSelectedAnnotationId(null);
+              setSelectedCodeAnnotationId(id);
+            }}
+          />
+        )}
+
         {/* Export Modal */}
         <ExportModal
           isOpen={showExport}
@@ -2308,12 +2441,9 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
           shortUrlError={shortUrlError}
           onGenerateShortUrl={generateShortUrl}
           annotationsOutput={annotationsOutput}
-          annotationCount={allAnnotations.length}
+          annotationCount={allAnnotations.length + codeAnnotations.length}
           taterSprite={taterMode ? <TaterSpritePullup /> : undefined}
-          // Static sharing is mutually exclusive with room mode. Also
-          // flip sharingEnabled on the modal so the Share tab doesn't
-          // default-open with empty/stale hash data.
-          sharingEnabled={sharingEnabled && !roomModeActive}
+          sharingEnabled={canShareCurrentSession}
           markdown={markdown}
           isApiMode={isApiMode}
           initialTab={initialExportTab}
@@ -2364,7 +2494,7 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
             handleApprove();
           }}
           title="Annotations Won't Be Sent"
-          message={<>{agentName} doesn't yet support feedback on approval. Your {allAnnotations.length} annotation{allAnnotations.length !== 1 ? 's' : ''} will be lost.</>}
+          message={<>{agentName} doesn't yet support feedback on approval. Your {allAnnotations.length + codeAnnotations.length} annotation{(allAnnotations.length + codeAnnotations.length) !== 1 ? 's' : ''} will be lost.</>}
           subMessage={
             <>
               To send feedback, use <strong>Send Feedback</strong> instead.
@@ -2382,18 +2512,19 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
           showCancel
         />
 
-        {/* Exit with annotations warning dialog */}
+        {/* Unsaved-annotations warning dialog — reused by Close and (in gate mode) Approve */}
         <ConfirmDialog
           isOpen={showExitWarning}
           onClose={() => setShowExitWarning(false)}
           onConfirm={() => {
             setShowExitWarning(false);
-            handleAnnotateExit();
+            if (exitWarningAction === 'approve') handleAnnotateApprove();
+            else handleAnnotateExit();
           }}
           title="Annotations Won't Be Sent"
-          message={<>You have {allAnnotations.length + editorAnnotations.length + linkedDocHook.docAnnotationCount + globalAttachments.length} annotation{(allAnnotations.length + editorAnnotations.length + linkedDocHook.docAnnotationCount + globalAttachments.length) !== 1 ? 's' : ''} that will be lost if you close.</>}
+          message={<>You have {feedbackAnnotationCount} annotation{feedbackAnnotationCount !== 1 ? 's' : ''} that will be lost if you {exitWarningAction === 'approve' ? 'approve' : 'close'}.</>}
           subMessage="To send your annotations, use Send Annotations instead."
-          confirmText="Close Anyway"
+          confirmText={exitWarningAction === 'approve' ? 'Approve Anyway' : 'Close Anyway'}
           cancelText="Cancel"
           variant="warning"
           showCancel
@@ -2463,8 +2594,9 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
           title={
             archive.archiveMode ? 'Archive Closed'
             : submitted === 'exited' ? 'Session Closed'
-            : submitted === 'approved' ? 'Plan Approved'
-            : annotateMode ? 'Annotations Sent'
+            : submitted === 'approved'
+              ? (annotateMode ? 'Approved' : 'Plan Approved')
+              : annotateMode ? 'Annotations Sent'
             : 'Feedback Sent'
           }
           subtitle={
@@ -2473,7 +2605,9 @@ const App: React.FC<AppProps> = ({ roomSession }) => {
               : archive.archiveMode
                 ? 'You can reopen with plannotator archive.'
                 : submitted === 'approved'
-                  ? `${agentName} will proceed with the implementation.`
+                  ? (annotateMode
+                      ? `${agentName} will proceed.`
+                      : `${agentName} will proceed with the implementation.`)
                   : annotateMode
                     ? `${agentName} will address your annotations on the ${annotateSource === 'message' ? 'message' : annotateSource === 'folder' ? 'files' : 'file'}.`
                     : `${agentName} will revise the plan based on your annotations.`

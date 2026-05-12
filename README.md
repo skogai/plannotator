@@ -26,8 +26,14 @@ Interactive Plan & Code Review for AI Coding Agents. Mark up and refine your pla
 </tr>
 </table>
 
-**New:** [Code Review](https://x.com/backnotprop/status/2031145299738263567?s=20)
+**Annotate:** Plans, specs, folders, files, urls. send feedback directly to agents. 
 
+**New:** [Code Review](https://x.com/backnotprop/status/2031145299738263567?s=20)
+  
+  - send your feedback to agents
+  - built-in: 
+    - ask ai
+    - agent code reviews 
 
 ### Features
 
@@ -218,6 +224,12 @@ irm https://plannotator.ai/install.ps1 | iex
 ```
 
 **Then in Codex — feedback flows back into the agent loop automatically:**
+
+```
+$plannotator-review          # Code review skill for current changes
+$plannotator-annotate        # Annotate a markdown file, URL, or folder
+$plannotator-last            # Annotate the last agent message
+```
 
 ```
 !plannotator review           # Code review for current changes

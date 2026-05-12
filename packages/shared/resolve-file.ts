@@ -14,6 +14,9 @@ import { isAbsolute, join, resolve, win32 } from "path";
 import { existsSync, readdirSync, type Dirent } from "fs";
 
 const MARKDOWN_PATH_REGEX = /\.mdx?$/i;
+
+export { CODE_FILE_REGEX, isCodeFilePath } from "./code-file";
+
 const WINDOWS_DRIVE_PATH_PATTERNS = [
 	/^\/cygdrive\/([a-zA-Z])\/(.+)$/,
 	/^\/([a-zA-Z])\/(.+)$/,
@@ -55,7 +58,7 @@ export function expandHomePath(input: string, home = homedir()): string {
 	return input;
 }
 
-function stripWrappingQuotes(input: string): string {
+export function stripWrappingQuotes(input: string): string {
 	if (input.length < 2) {
 		return input;
 	}

@@ -77,6 +77,18 @@ interface UseSharingResult {
 }
 
 
+// Share payloads are base64url-encoded deflate output: charset [A-Za-z0-9_-],
+// realistically >=30 chars, and virtually always mixed-case because deflate
+// output has high entropy. Plain heading anchors — whether the lowercase
+// ASCII slugs from `slugifyHeading` ("section-overview"), Unicode slugs
+// ("café", "中文-notes"), or raw HTML ids ("MySection") — miss at least one
+// of those signals. So: run share parsing only when the hash looks like a
+// share payload. Everything else is left for Viewer to scroll to (or ignore).
+function looksLikeSharePayload(rawHash: string): boolean {
+  const hash = rawHash.replace(/^#/, '').split('?')[0];
+  return hash.length >= 30 && /^[A-Za-z0-9_-]+$/.test(hash) && /[A-Z]/.test(hash);
+}
+
 export function useSharing(
   markdown: string,
   annotations: Annotation[],
@@ -163,6 +175,12 @@ export function useSharing(
       }
 
       const hash = window.location.hash.slice(1);
+
+      // Not a share payload — leave it for Viewer to scroll to (or ignore).
+      if (!looksLikeSharePayload(hash)) {
+        return false;
+      }
+
       const payload = await parseShareHash();
 
       if (payload) {
@@ -236,9 +254,8 @@ export function useSharing(
   useEffect(() => {
     if (disabled) return;
     const handleHashChange = () => {
-      if (window.location.hash.length > 1) {
-        loadFromHash();
-      }
+      if (!looksLikeSharePayload(window.location.hash)) return;
+      loadFromHash();
     };
 
     window.addEventListener('hashchange', handleHashChange);

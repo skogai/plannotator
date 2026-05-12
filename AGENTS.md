@@ -261,8 +261,9 @@ work; it is not part of the room-origin approve/deny surface.
 
 | Endpoint              | Method | Purpose                                    |
 | --------------------- | ------ | ------------------------------------------ |
-| `/api/diff`           | GET    | Returns `{ rawPatch, gitRef, origin, diffType, gitContext }` |
-| `/api/file-content`   | GET    | Returns `{ oldContent, newContent }` for expandable diff context |
+| `/api/diff`           | GET    | Returns `{ rawPatch, gitRef, origin, diffType, base, hideWhitespace, gitContext }` |
+| `/api/diff/switch`    | POST   | Switch diff type, base branch, or whitespace mode (body: `{ diffType, base?, hideWhitespace? }`) |
+| `/api/file-content`   | GET    | Returns `{ oldContent, newContent }` for expandable diff context (`?path=&oldPath=&base=`) |
 | `/api/git-add`        | POST   | Stage/unstage a file (body: `{ filePath, undo? }`) |
 | `/api/feedback`       | POST   | Submit review (body: feedback, annotations, agentSwitch) |
 | `/api/image`          | GET    | Serve image by path query param            |
@@ -287,6 +288,9 @@ work; it is not part of the room-origin approve/deny surface.
 | `/api/agents/jobs` | POST | Launch an agent job (body: `{ provider, command, label }`) |
 | `/api/agents/jobs` | DELETE | Kill all running agent jobs |
 | `/api/agents/jobs/:id` | DELETE | Kill a specific agent job |
+| `/api/pr-diff-scope` | POST | Switch between layer and full-stack diff scope |
+| `/api/pr-list` | GET | List PRs for the current repo (cached 30s) |
+| `/api/pr-switch` | POST | Switch to a different PR in-place (body: `{ url }`) |
 | `/api/tour/:jobId` | GET | Fetch Code Tour result (greeting, stops, checklist) for a completed tour job |
 | `/api/tour/:jobId/checklist` | PUT | Persist checklist item state for a Code Tour |
 
@@ -294,8 +298,10 @@ work; it is not part of the room-origin approve/deny surface.
 
 | Endpoint              | Method | Purpose                                    |
 | --------------------- | ------ | ------------------------------------------ |
-| `/api/plan`           | GET    | Returns `{ plan, origin, mode: "annotate", filePath, sourceInfo? }` |
+| `/api/plan`           | GET    | Returns `{ plan, origin, mode: "annotate", filePath, sourceInfo?, gate }` |
 | `/api/feedback`       | POST   | Submit annotations (body: feedback, annotations) |
+| `/api/approve`        | POST   | Approve without feedback (review-gate UX, `--gate`) |
+| `/api/exit`           | POST   | Close session without feedback |
 | `/api/image`          | GET    | Serve image by path query param            |
 | `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
 | `/api/draft`          | GET/POST/DELETE | Auto-save annotation drafts to survive server crashes |

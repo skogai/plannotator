@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Annotation, AnnotationType, Block, type EditorAnnotation } from '../types';
+import { Annotation, AnnotationType, Block, type CodeAnnotation, type EditorAnnotation } from '../types';
 import { isCurrentUser } from '../utils/identity';
 import { ImageThumbnail } from './ImageThumbnail';
 import { EditorAnnotationCard } from './EditorAnnotationCard';
@@ -14,6 +14,10 @@ interface PanelProps {
   onDelete: (id: string) => void;
   onEdit?: (id: string, updates: Partial<Annotation>) => void;
   selectedId: string | null;
+  codeAnnotations?: CodeAnnotation[];
+  onSelectCodeAnnotation?: (id: string) => void;
+  onDeleteCodeAnnotation?: (id: string) => void;
+  onEditCodeAnnotation?: (id: string, updates: Partial<CodeAnnotation>) => void;
   sharingEnabled?: boolean;
   width?: number;
   editorAnnotations?: EditorAnnotation[];
@@ -54,6 +58,10 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   onDelete,
   onEdit,
   selectedId,
+  codeAnnotations = [],
+  onSelectCodeAnnotation,
+  onDeleteCodeAnnotation,
+  onEditCodeAnnotation,
   sharingEnabled = true,
   width,
   editorAnnotations,
@@ -80,10 +88,6 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   const isMobile = useIsMobile();
   const [copiedText, setCopiedText] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
-  // Render list = canonical annotations + optimistic pending-add rows.
-  // `annotations` stays clean for approve/deny/export; the merge here is
-  // purely presentational so users see "Sending…" / failed cards before
-  // the server echo lands.
   const renderAnnotations = useMemo(() => {
     if (!pendingAdditions || pendingAdditions.size === 0) return annotations;
     const seen = new Set(annotations.map(a => a.id));
@@ -94,7 +98,12 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
     return extra.length > 0 ? [...annotations, ...extra] : annotations;
   }, [annotations, pendingAdditions]);
   const sortedAnnotations = [...renderAnnotations].sort((a, b) => a.createdA - b.createdA);
-  const totalCount = renderAnnotations.length + (editorAnnotations?.length ?? 0);
+  const sortedCodeAnnotations = [...codeAnnotations].sort((a, b) => a.createdAt - b.createdAt);
+  const timelineEntries = [
+    ...sortedAnnotations.map(annotation => ({ kind: 'plan' as const, ts: annotation.createdA, annotation })),
+    ...sortedCodeAnnotations.map(annotation => ({ kind: 'code' as const, ts: annotation.createdAt, annotation })),
+  ].sort((a, b) => a.ts - b.ts);
+  const totalCount = renderAnnotations.length + codeAnnotations.length + (editorAnnotations?.length ?? 0);
 
   // Scroll selected annotation card into view
   useEffect(() => {
@@ -160,12 +169,25 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
               </svg>
             </div>
             <p className="text-xs text-muted-foreground">
-              Select text to add annotations
+              Select text or code lines to add annotations
             </p>
           </div>
         ) : (
           <>
-            {sortedAnnotations.map(ann => {
+            {timelineEntries.map(entry => {
+              if (entry.kind === 'code') {
+                return (
+                  <CodeAnnotationCard
+                    key={entry.annotation.id}
+                    annotation={entry.annotation}
+                    isSelected={selectedId === entry.annotation.id}
+                    onSelect={() => onSelectCodeAnnotation?.(entry.annotation.id)}
+                    onDelete={() => onDeleteCodeAnnotation?.(entry.annotation.id)}
+                    onEdit={onEditCodeAnnotation ? (updates: Partial<CodeAnnotation>) => onEditCodeAnnotation(entry.annotation.id, updates) : undefined}
+                  />
+                );
+              }
+              const ann = entry.annotation;
               const isPending = pendingIds?.has(ann.id) ?? false;
               const failure = failedIds?.get(ann.id);
               return (
@@ -187,13 +209,6 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                     isSelected={selectedId === ann.id}
                     isMe={isMe}
                     onSelect={() => onSelect(ann.id)}
-                    // Pending / failed rows: suppress normal edit/delete.
-                    // Room controller tracks at most one pending op per id;
-                    // mutating while an add/update/remove is in flight (or
-                    // already failed) would either overwrite the pending
-                    // op's retry payload or enqueue a conflicting op the
-                    // user can't reason about. Failed rows offer the
-                    // dedicated Retry/Discard controls rendered below.
                     onDelete={
                       isPending || failure
                         ? undefined
@@ -211,35 +226,19 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                       role="alert"
                     >
                       <span className="flex-1">Failed to {failure.kind}: {failure.error}</span>
-                      <button
-                        type="button"
-                        className="underline"
-                        onClick={() => onRetry(ann.id)}
-                        data-testid={`annotation-retry-${ann.id}`}
-                      >
-                        Retry
-                      </button>
-                      <button
-                        type="button"
-                        className="underline"
-                        onClick={() => onDiscard(ann.id)}
-                        data-testid={`annotation-discard-${ann.id}`}
-                      >
-                        Discard
-                      </button>
+                      <button type="button" className="underline" onClick={() => onRetry(ann.id)} data-testid={`annotation-retry-${ann.id}`}>Retry</button>
+                      <button type="button" className="underline" onClick={() => onDiscard(ann.id)} data-testid={`annotation-discard-${ann.id}`}>Discard</button>
                     </div>
                   )}
                   {isPending && !failure && (
-                    <div className="text-[10px] text-muted-foreground px-2 py-0.5">
-                      Sending…
-                    </div>
+                    <div className="text-[10px] text-muted-foreground px-2 py-0.5">Sending…</div>
                   )}
                 </div>
               );
             })}
             {editorAnnotations && editorAnnotations.length > 0 && (
               <>
-                {sortedAnnotations.length > 0 && (
+                {timelineEntries.length > 0 && (
                   <div className="flex items-center gap-2 pt-2 pb-1">
                     <div className="flex-1 border-t border-border/30" />
                     <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/60">Editor</span>
@@ -618,6 +617,173 @@ const AnnotationCard: React.FC<{
                 size="sm"
                 showRemove={false}
               />
+              <div className="text-[9px] text-muted-foreground truncate max-w-[3rem]" title={img.name}>{img.name}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const CodeAnnotationCard: React.FC<{
+  annotation: CodeAnnotation;
+  isSelected: boolean;
+  onSelect: () => void;
+  onDelete: () => void;
+  onEdit?: (updates: Partial<CodeAnnotation>) => void;
+}> = ({ annotation, isSelected, onSelect, onDelete, onEdit }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState(annotation.text || '');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (isEditing) {
+      textareaRef.current?.focus();
+      textareaRef.current?.select();
+    }
+  }, [isEditing]);
+
+  useEffect(() => {
+    if (!isEditing) setEditText(annotation.text || '');
+  }, [annotation.text, isEditing]);
+
+  const handleSaveEdit = () => {
+    onEdit?.({ text: editText });
+    setIsEditing(false);
+  };
+
+  const lineRange = annotation.lineStart === annotation.lineEnd
+    ? `line ${annotation.lineStart}`
+    : `lines ${annotation.lineStart}-${annotation.lineEnd}`;
+  const fileName = annotation.filePath.split('/').pop() || annotation.filePath;
+
+  return (
+    <div
+      data-annotation-id={annotation.id}
+      onClick={onSelect}
+      className={`group relative p-2.5 rounded-lg border cursor-pointer transition-all ${
+        isSelected
+          ? 'bg-primary/5 border-primary/30 shadow-sm'
+          : 'border-transparent hover:bg-muted/50 hover:border-border/50'
+      }`}
+    >
+      {annotation.author && (
+        <div className={`flex items-center gap-1.5 text-[10px] font-mono truncate mb-1.5 ${isCurrentUser(annotation.author) ? 'text-muted-foreground/60' : 'text-muted-foreground'}`}>
+          <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+          </svg>
+          <span className="truncate">{annotation.author}{isCurrentUser(annotation.author) && ' (me)'}</span>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between mb-2">
+        <div className="min-w-0 flex items-center gap-2">
+          <div className="flex items-center gap-1.5 text-primary">
+            <span className="p-1 rounded bg-primary/10">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+              </svg>
+            </span>
+            <span className="text-[10px] font-semibold uppercase tracking-wide">Code</span>
+          </div>
+          <span className="text-[10px] text-muted-foreground/50">{formatTimestamp(annotation.createdAt)}</span>
+        </div>
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-all">
+          {onEdit && !isEditing && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsEditing(true);
+              }}
+              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-all"
+              title="Edit annotation"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </button>
+          )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+            title="Delete annotation"
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div className="text-[11px] font-mono text-muted-foreground bg-muted/50 rounded px-2 py-1.5 truncate" title={annotation.filePath}>
+        {fileName} · {lineRange}
+      </div>
+
+      {annotation.originalCode && (
+        <div className="mt-1.5 text-[11px] font-mono text-muted-foreground bg-muted/30 rounded px-2 py-1.5 whitespace-pre-wrap max-h-24 overflow-y-auto">
+          {annotation.originalCode}
+        </div>
+      )}
+
+      {isEditing ? (
+        <div className="mt-2 space-y-2">
+          <textarea
+            ref={textareaRef}
+            value={editText}
+            onChange={(e) => setEditText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                handleSaveEdit();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                setIsEditing(false);
+                setEditText(annotation.text || '');
+              }
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full text-xs text-foreground/90 pl-2 border-l-2 border-primary/50 bg-background border border-border rounded px-2 py-1.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary/50"
+            rows={Math.min(editText.split('\n').length + 1, 8)}
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleSaveEdit();
+              }}
+              className="px-2 py-1 text-[10px] font-medium rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              Save
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsEditing(false);
+                setEditText(annotation.text || '');
+              }}
+              className="px-2 py-1 text-[10px] font-medium rounded bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        annotation.text && (
+          <div className="mt-2 text-xs text-foreground/90 pl-2 border-l-2 border-primary/50 whitespace-pre-wrap">
+            {annotation.text}
+          </div>
+        )
+      )}
+
+      {annotation.images && annotation.images.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {annotation.images.map((img) => (
+            <div key={img.path} className="text-center">
+              <ImageThumbnail path={img.path} size="sm" showRemove={false} />
               <div className="text-[9px] text-muted-foreground truncate max-w-[3rem]" title={img.name}>{img.name}</div>
             </div>
           ))}

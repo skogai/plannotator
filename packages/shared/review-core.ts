@@ -14,6 +14,7 @@ export type DiffType =
   | "last-commit"
   | "branch"
   | "merge-base"
+  | "all"
   | `worktree:${string}`
   | "p4-default"
   | `p4-changelist:${string}`;
@@ -29,11 +30,17 @@ export interface WorktreeInfo {
   head: string;
 }
 
+export interface AvailableBranches {
+  local: string[];
+  remote: string[];
+}
+
 export interface GitContext {
   currentBranch: string;
   defaultBranch: string;
   diffOptions: DiffOption[];
   worktrees: WorktreeInfo[];
+  availableBranches: AvailableBranches;
   cwd?: string;
   vcsType?: "git" | "p4";
 }
@@ -53,9 +60,13 @@ export interface GitCommandResult {
 export interface ReviewGitRuntime {
   runGit: (
     args: string[],
-    options?: { cwd?: string },
+    options?: { cwd?: string; timeoutMs?: number },
   ) => Promise<GitCommandResult>;
   readTextFile: (path: string) => Promise<string | null>;
+}
+
+export interface GitDiffOptions {
+  hideWhitespace?: boolean;
 }
 
 export async function getCurrentBranch(
@@ -73,13 +84,27 @@ export async function getDefaultBranch(
   runtime: ReviewGitRuntime,
   cwd?: string,
 ): Promise<string> {
+  // Prefer the remote tracking ref (e.g. `origin/main`) so diffs run against
+  // the upstream tip, not a potentially stale local copy. Only fall back to
+  // a local ref when there's no remote configured at all.
   const remoteHead = await runtime.runGit(
     ["symbolic-ref", "refs/remotes/origin/HEAD"],
     { cwd },
   );
   if (remoteHead.exitCode === 0) {
     const ref = remoteHead.stdout.trim();
-    if (ref) return ref.replace("refs/remotes/origin/", "");
+    if (ref) {
+      // `symbolic-ref` only tells us what origin/HEAD *points at* — it does
+      // not guarantee that the target ref was actually fetched. In narrow
+      // or partial clones the pointer can be set while the target is
+      // missing, in which case a later `git diff origin/main..HEAD` would
+      // error. Verify the target exists before trusting it.
+      const verify = await runtime.runGit(
+        ["show-ref", "--verify", "--quiet", ref],
+        { cwd },
+      );
+      if (verify.exitCode === 0) return ref.replace("refs/remotes/", "");
+    }
   }
 
   const mainBranch = await runtime.runGit(
@@ -89,6 +114,98 @@ export async function getDefaultBranch(
   if (mainBranch.exitCode === 0) return "main";
 
   return "master";
+}
+
+/**
+ * Query the remote for its default branch via `ls-remote --symref`. Returns
+ * `origin/<name>` if the remote answers and the tracking ref exists locally,
+ * otherwise `null`. Designed to run in the background at server startup — the
+ * caller fires it with `.then()` and uses the result if/when it arrives.
+ *
+ * Timeout-guarded: if the network is slow or absent, the promise resolves
+ * (with `null`) once the timeout fires. Never throws.
+ */
+export async function detectRemoteDefaultBranch(
+  runtime: ReviewGitRuntime,
+  cwd?: string,
+): Promise<string | null> {
+  try {
+    const lsRemote = await runtime.runGit(
+      ["ls-remote", "--symref", "origin", "HEAD"],
+      { cwd, timeoutMs: 5000 },
+    );
+    if (lsRemote.exitCode !== 0) return null;
+    const match = lsRemote.stdout.match(/^ref:\s+refs\/heads\/(\S+)\s+HEAD/m);
+    if (!match) return null;
+    const remoteBranch = `origin/${match[1]}`;
+    const refExists = await runtime.runGit(
+      ["show-ref", "--verify", "--quiet", `refs/remotes/${remoteBranch}`],
+      { cwd },
+    );
+    return refExists.exitCode === 0 ? remoteBranch : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function listBranches(
+  runtime: ReviewGitRuntime,
+  cwd?: string,
+): Promise<AvailableBranches> {
+  // Emit `<full-refname>\t<short-name>` so we can classify by ref prefix
+  // without guessing from the short form — local branches can contain `/`
+  // (e.g. `feature/foo`), so `name.includes("/")` would misclassify them.
+  const result = await runtime.runGit(
+    [
+      "for-each-ref",
+      "--format=%(refname)\t%(refname:short)",
+      "refs/heads",
+      "refs/remotes",
+    ],
+    { cwd },
+  );
+  if (result.exitCode !== 0) return { local: [], remote: [] };
+
+  const local: string[] = [];
+  const remote: string[] = [];
+
+  for (const line of result.stdout.split("\n")) {
+    const [fullRef, shortName] = line.split("\t");
+    if (!fullRef || !shortName) continue;
+    if (shortName.endsWith("/HEAD")) continue;
+    if (fullRef.startsWith("refs/heads/")) {
+      local.push(shortName);
+    } else if (fullRef.startsWith("refs/remotes/")) {
+      remote.push(shortName);
+    }
+  }
+
+  // Keep both local and remote refs — they can point to different commits
+  // (stale local tracking branches are common) and users need to be able to
+  // pick either explicitly. The picker groups them separately for clarity.
+  local.sort();
+  remote.sort();
+
+  return { local, remote };
+}
+
+/**
+ * Pick a safe base branch. Trusts the caller verbatim if they supplied one,
+ * otherwise falls back to the detected default. Shared by Bun (`review.ts`)
+ * and Pi (`serverReview.ts`) so both runtimes behave identically.
+ *
+ * Why trust the caller: the UI picker only ever sends refs from the known
+ * list, and external/programmatic callers may pass tags, SHAs, or refs under
+ * non-`origin` remotes that we must not silently rewrite (a tag `release` is
+ * not the same commit as a branch `origin/release`). Invalid refs surface as
+ * git errors on the next diff call, which is better than silently producing
+ * a patch against the wrong commit.
+ */
+export function resolveBaseBranch(
+  requested: string | undefined,
+  detected: string,
+): string {
+  return requested || detected;
 }
 
 export async function getWorktrees(
@@ -137,9 +254,10 @@ export async function getGitContext(
   runtime: ReviewGitRuntime,
   cwd?: string,
 ): Promise<GitContext> {
-  const [currentBranch, defaultBranch] = await Promise.all([
+  const [currentBranch, defaultBranch, availableBranches] = await Promise.all([
     getCurrentBranch(runtime, cwd),
     getDefaultBranch(runtime, cwd),
+    listBranches(runtime, cwd),
   ]);
 
   const diffOptions: DiffOption[] = [
@@ -149,10 +267,20 @@ export async function getGitContext(
     { id: "last-commit", label: "Last commit" },
   ];
 
-  if (currentBranch !== defaultBranch) {
-    diffOptions.push({ id: "branch", label: `vs ${defaultBranch}` });
-    diffOptions.push({ id: "merge-base", label: `Current PR Diff` });
+  // Always offer Branch diff / PR Diff when a default branch exists. The
+  // older guard hid them when the reviewer was on the default branch (the
+  // `vs <default>` diff from the default branch itself is always empty), but
+  // the base picker now lets reviewers compare against any branch from any
+  // branch, so there's no meaningless-by-construction option. Also: preserving
+  // diff mode across worktree switches and Pi's `initialBase` can land the
+  // reviewer on the default branch with branch/merge-base already active — the
+  // old guard hid the active mode's option, trapping them. Unconditional
+  // emission keeps the active option reachable in every flow.
+  if (defaultBranch) {
+    diffOptions.push({ id: "merge-base", label: "Committed changes" });
   }
+
+  diffOptions.push({ id: "all", label: "All files (HEAD)" });
 
   const [worktrees, currentTreePathResult] = await Promise.all([
     getWorktrees(runtime, cwd),
@@ -169,6 +297,7 @@ export async function getGitContext(
     defaultBranch,
     diffOptions,
     worktrees: worktrees.filter((wt) => wt.path !== currentTreePath),
+    availableBranches,
     cwd,
   };
 }
@@ -178,6 +307,7 @@ async function getUntrackedFileDiffs(
   srcPrefix = "a/",
   dstPrefix = "b/",
   cwd?: string,
+  options?: GitDiffOptions,
 ): Promise<string> {
   // git ls-files scopes to the CWD subtree and returns CWD-relative paths,
   // unlike git diff HEAD which always covers the full repo with root-relative
@@ -209,6 +339,7 @@ async function getUntrackedFileDiffs(
         [
           "diff",
           "--no-ext-diff",
+          ...(options?.hideWhitespace ? ["-w"] : []),
           "--no-index",
           `--src-prefix=${srcPrefix}`,
           `--dst-prefix=${dstPrefix}`,
@@ -245,6 +376,8 @@ const WORKTREE_SUB_TYPES = new Set([
   "unstaged",
   "last-commit",
   "branch",
+  "merge-base",
+  "all",
 ]);
 
 export function parseWorktreeDiffType(
@@ -269,6 +402,7 @@ export async function runGitDiff(
   diffType: DiffType,
   defaultBranch: string = "main",
   externalCwd?: string,
+  options?: GitDiffOptions,
 ): Promise<DiffResult> {
   let patch = "";
   let label = "";
@@ -288,12 +422,15 @@ export async function runGitDiff(
     effectiveDiffType = parsed.subType;
   }
 
+  const wFlag = options?.hideWhitespace ? ["-w"] : [];
+
   try {
     switch (effectiveDiffType) {
       case "uncommitted": {
         const trackedDiffArgs = [
           "diff",
           "--no-ext-diff",
+          ...wFlag,
           "HEAD",
           "--src-prefix=a/",
           "--dst-prefix=b/",
@@ -312,6 +449,7 @@ export async function runGitDiff(
           "a/",
           "b/",
           cwd,
+          options,
         );
         patch = trackedPatch + untrackedDiff;
         label = "Uncommitted changes";
@@ -322,6 +460,7 @@ export async function runGitDiff(
         const stagedDiffArgs = [
           "diff",
           "--no-ext-diff",
+          ...wFlag,
           "--staged",
           "--src-prefix=a/",
           "--dst-prefix=b/",
@@ -336,7 +475,13 @@ export async function runGitDiff(
       }
 
       case "unstaged": {
-        const trackedDiffArgs = ["diff", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/"];
+        const trackedDiffArgs = [
+          "diff",
+          "--no-ext-diff",
+          ...wFlag,
+          "--src-prefix=a/",
+          "--dst-prefix=b/",
+        ];
         const trackedDiff = assertGitSuccess(
           await runtime.runGit(trackedDiffArgs, { cwd }),
           trackedDiffArgs,
@@ -346,6 +491,7 @@ export async function runGitDiff(
           "a/",
           "b/",
           cwd,
+          options,
         );
         patch = trackedDiff.stdout + untrackedDiff;
         label = "Unstaged changes";
@@ -359,8 +505,8 @@ export async function runGitDiff(
         );
         const args =
           hasParent.exitCode === 0
-            ? ["diff", "--no-ext-diff", "HEAD~1..HEAD", "--src-prefix=a/", "--dst-prefix=b/"]
-            : ["diff", "--no-ext-diff", "--root", "HEAD", "--src-prefix=a/", "--dst-prefix=b/"];
+            ? ["diff", "--no-ext-diff", ...wFlag, "HEAD~1..HEAD", "--src-prefix=a/", "--dst-prefix=b/"]
+            : ["diff", "--no-ext-diff", ...wFlag, "--root", "HEAD", "--src-prefix=a/", "--dst-prefix=b/"];
         const lastCommitDiff = assertGitSuccess(
           await runtime.runGit(args, { cwd }),
           args,
@@ -371,12 +517,18 @@ export async function runGitDiff(
       }
 
       case "branch": {
+        // `--end-of-options` hardens against a caller-supplied `defaultBranch`
+        // that starts with `-` being parsed as a git flag (e.g. `--output=...`
+        // would redirect diff output to an attacker-chosen path). Same pattern
+        // applied wherever user-controlled refs flow into a git argv.
         const branchDiffArgs = [
           "diff",
           "--no-ext-diff",
-          `${defaultBranch}..HEAD`,
+          ...wFlag,
           "--src-prefix=a/",
           "--dst-prefix=b/",
+          "--end-of-options",
+          `${defaultBranch}..HEAD`,
         ];
         const branchDiff = assertGitSuccess(
           await runtime.runGit(branchDiffArgs, { cwd }),
@@ -388,17 +540,20 @@ export async function runGitDiff(
       }
 
       case "merge-base": {
+        const mergeBaseLookupArgs = ["merge-base", "--end-of-options", defaultBranch, "HEAD"];
         const mergeBaseResult = assertGitSuccess(
-          await runtime.runGit(["merge-base", defaultBranch, "HEAD"], { cwd }),
-          ["merge-base", defaultBranch, "HEAD"],
+          await runtime.runGit(mergeBaseLookupArgs, { cwd }),
+          mergeBaseLookupArgs,
         );
         const mergeBase = mergeBaseResult.stdout.trim();
         const mergeBaseDiffArgs = [
           "diff",
           "--no-ext-diff",
-          `${mergeBase}..HEAD`,
+          ...wFlag,
           "--src-prefix=a/",
           "--dst-prefix=b/",
+          "--end-of-options",
+          `${mergeBase}..HEAD`,
         ];
         const mergeBaseDiff = assertGitSuccess(
           await runtime.runGit(mergeBaseDiffArgs, { cwd }),
@@ -406,6 +561,30 @@ export async function runGitDiff(
         );
         patch = mergeBaseDiff.stdout;
         label = `PR diff vs ${defaultBranch}`;
+        break;
+      }
+
+      case "all": {
+        // Diff from the empty tree to HEAD — shows every tracked file as an addition.
+        const emptyTreeResult = await runtime.runGit(["hash-object", "-t", "tree", "/dev/null"], { cwd });
+        const emptyTree = emptyTreeResult.exitCode === 0
+          ? emptyTreeResult.stdout.trim()
+          : "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        const allDiffArgs = [
+          "diff",
+          "--no-ext-diff",
+          ...wFlag,
+          "--src-prefix=a/",
+          "--dst-prefix=b/",
+          "--end-of-options",
+          `${emptyTree}..HEAD`,
+        ];
+        const allDiff = assertGitSuccess(
+          await runtime.runGit(allDiffArgs, { cwd }),
+          allDiffArgs,
+        );
+        patch = allDiff.stdout;
+        label = "All files";
         break;
       }
 
@@ -440,8 +619,9 @@ export async function runGitDiffWithContext(
   runtime: ReviewGitRuntime,
   diffType: DiffType,
   gitContext: GitContext,
+  options?: GitDiffOptions,
 ): Promise<DiffResult> {
-  return runGitDiff(runtime, diffType, gitContext.defaultBranch, gitContext.cwd);
+  return runGitDiff(runtime, diffType, gitContext.defaultBranch, gitContext.cwd, options);
 }
 
 export async function getFileContentsForDiff(
@@ -463,7 +643,8 @@ export async function getFileContentsForDiff(
   }
 
   async function gitShow(ref: string, path: string): Promise<string | null> {
-    const result = await runtime.runGit(["show", `${ref}:${path}`], { cwd });
+    // `--end-of-options` hardens against user-supplied refs starting with `-`.
+    const result = await runtime.runGit(["show", "--end-of-options", `${ref}:${path}`], { cwd });
     return result.exitCode === 0 ? result.stdout : null;
   }
 
@@ -499,13 +680,18 @@ export async function getFileContentsForDiff(
         newContent: await gitShow("HEAD", filePath),
       };
     case "merge-base": {
-      const mbResult = await runtime.runGit(["merge-base", defaultBranch, "HEAD"], { cwd });
+      const mbResult = await runtime.runGit(["merge-base", "--end-of-options", defaultBranch, "HEAD"], { cwd });
       const mb = mbResult.exitCode === 0 ? mbResult.stdout.trim() : defaultBranch;
       return {
         oldContent: await gitShow(mb, oldFilePath),
         newContent: await gitShow("HEAD", filePath),
       };
     }
+    case "all":
+      return {
+        oldContent: null,
+        newContent: await gitShow("HEAD", filePath),
+      };
     default:
       return { oldContent: null, newContent: null };
   }

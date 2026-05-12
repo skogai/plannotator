@@ -287,10 +287,22 @@ callouts. The primary question is "what does this change do and why?" not
 function buildTourUserMessage(
   patch: string,
   diffType: DiffType,
-  options?: { defaultBranch?: string; hasLocalAccess?: boolean },
+  options?: { defaultBranch?: string; hasLocalAccess?: boolean; prDiffScope?: string },
   prMetadata?: PRMetadata,
 ): string {
   if (prMetadata) {
+    if (options?.prDiffScope === "full-stack") {
+      return [
+        `Full-stack tour of ${prMetadata.url}`,
+        "",
+        "This is a stacked PR. The diff below shows ALL accumulated changes from the repository default branch through this PR's head (not just this PR's own layer).",
+        "Walk the reviewer through the complete changeset as a guided tour.",
+        "",
+        "```diff",
+        patch,
+        "```",
+      ].join("\n");
+    }
     if (options?.hasLocalAccess) {
       return [
         prMetadata.url,
@@ -322,6 +334,12 @@ function buildTourUserMessage(
       const base = options?.defaultBranch || "main";
       return `Walk the reviewer through the code changes against the base branch '${base}' as a guided tour. Run \`git diff ${base}..HEAD\` to inspect the changes.`;
     }
+    case "merge-base": {
+      const base = options?.defaultBranch || "main";
+      return `Walk the reviewer through the PR-style diff against base '${base}' as a guided tour. First find the common ancestor with \`git merge-base ${base} HEAD\`, then run \`git diff <merge-base>..HEAD\` using that commit to inspect only the changes introduced on this branch (matches GitHub's PR view).`;
+    }
+    case "all":
+      return "Walk the reviewer through every file in the repository as a guided tour. All files are shown as additions (diffed against an empty tree).";
     default:
       return [
         "Walk the reviewer through the following code changes as a guided tour.",

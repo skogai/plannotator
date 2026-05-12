@@ -2,6 +2,7 @@ import { existsSync, readFileSync, realpathSync, rmSync, statSync } from "node:f
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
+import { createWorktreePool, type WorktreePool } from "./generated/worktree-pool.js";
 import { fileURLToPath } from "node:url";
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import {
@@ -25,6 +26,7 @@ import {
 import { parseRemoteUrl } from "./generated/repo.js";
 import { fetchRef, createWorktree, removeWorktree, ensureObjectAvailable } from "./generated/worktree.js";
 import { loadConfig, resolveDefaultDiffType } from "./generated/config.js";
+export { getLastAssistantMessageText } from "./assistant-message.js";
 
 export type AnnotateMode = "annotate" | "annotate-folder" | "annotate-last";
 export interface PlanReviewDecision {
@@ -35,12 +37,15 @@ export interface PlanReviewDecision {
 	permissionMode?: string;
 }
 
-export interface PlanReviewBrowserSession {
-	reviewId: string;
+export interface BrowserDecisionSession<T> {
 	url: string;
-	waitForDecision: () => Promise<PlanReviewDecision>;
-	onDecision: (listener: (result: PlanReviewDecision) => void | Promise<void>) => () => void;
+	waitForDecision: () => Promise<T>;
 	stop: () => void;
+}
+
+export interface PlanReviewBrowserSession extends BrowserDecisionSession<PlanReviewDecision> {
+	reviewId: string;
+	onDecision: (listener: (result: PlanReviewDecision) => void | Promise<void>) => () => void;
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -75,33 +80,6 @@ export function getStartupErrorMessage(err: unknown): string {
 	return err instanceof Error ? err.message : "Unknown error";
 }
 
-type AssistantTextBlock = { type?: string; text?: string };
-
-type AssistantMessageLike = { role?: unknown; content?: unknown };
-
-function isAssistantMessage(message: AssistantMessageLike): message is { role: "assistant"; content: AssistantTextBlock[] } {
-	return message.role === "assistant" && Array.isArray(message.content);
-}
-
-function getTextContent(message: { content: AssistantTextBlock[] }): string {
-	return message.content
-		.filter((block): block is { type: "text"; text: string } => block.type === "text")
-		.map((block) => block.text)
-		.join("\n");
-}
-
-export async function getLastAssistantMessageText(ctx: ExtensionContext): Promise<string | null> {
-	const entries = ctx.sessionManager.getEntries();
-	for (let i = entries.length - 1; i >= 0; i--) {
-		const entry = entries[i] as { type: string; message?: AssistantMessageLike };
-		if (entry.type === "message" && entry.message && isAssistantMessage(entry.message)) {
-			const text = getTextContent(entry.message);
-			if (text.trim()) return text;
-		}
-	}
-	return null;
-}
-
 function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): void {
 	const browserResult = openBrowser(serverUrl);
 	if (browserResult.isRemote) {
@@ -117,11 +95,62 @@ async function openBrowserAndWait<T>(
 	waitForResult: () => Promise<T>,
 ): Promise<T> {
 	openBrowserForServer(server.url, ctx);
+	return waitForDecisionWithCleanup(server, waitForResult);
+}
 
-	const result = await waitForResult();
-	await delay(1500);
-	server.stop();
-	return result;
+async function waitForDecisionWithCleanup<T>(
+	server: { url: string; stop: () => void },
+	waitForResult: () => Promise<T>,
+): Promise<T> {
+	try {
+		const result = await waitForResult();
+		await delay(1500);
+		return result;
+	} finally {
+		server.stop();
+	}
+}
+
+function startBrowserDecisionSession<T>(
+	server: { url: string; stop: () => void },
+	ctx: ExtensionContext,
+	waitForResult: () => Promise<T>,
+): BrowserDecisionSession<T> {
+	openBrowserForServer(server.url, ctx);
+	let stopped = false;
+	let stopReject: ((err: Error) => void) | undefined;
+	let decisionPromise: Promise<T> | undefined;
+	const createStoppedError = () => new Error("Plannotator browser session was stopped.");
+	const stop = () => {
+		if (stopped) return;
+		stopped = true;
+		server.stop();
+		stopReject?.(createStoppedError());
+		stopReject = undefined;
+	};
+
+	return {
+		url: server.url,
+		waitForDecision: () => {
+			if (decisionPromise) return decisionPromise;
+			if (stopped) return Promise.reject(createStoppedError());
+			decisionPromise = (async () => {
+				const stoppedPromise = new Promise<never>((_, reject) => {
+					stopReject = reject;
+				});
+				try {
+					const result = await Promise.race([waitForResult(), stoppedPromise]);
+					stopReject = undefined;
+					await delay(1500);
+					return result;
+				} finally {
+					stop();
+				}
+			})();
+			return decisionPromise;
+		},
+		stop,
+	};
 }
 
 export async function startPlanReviewBrowserSession(
@@ -141,17 +170,15 @@ export async function startPlanReviewBrowserSession(
 		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
 	});
 
-	openBrowserForServer(server.url, ctx);
+	const session = startBrowserDecisionSession(server, ctx, server.waitForDecision);
 	server.onDecision(() => {
-		setTimeout(() => server.stop(), 1500);
+		setTimeout(() => session.stop(), 1500);
 	});
 
 	return {
+		...session,
 		reviewId: server.reviewId,
-		url: server.url,
-		waitForDecision: server.waitForDecision,
 		onDecision: server.onDecision,
-		stop: server.stop,
 	};
 }
 
@@ -167,6 +194,22 @@ export async function openCodeReview(
 	ctx: ExtensionContext,
 	options: { cwd?: string; defaultBranch?: string; diffType?: DiffType; prUrl?: string } = {},
 ): Promise<{ approved: boolean; feedback?: string; annotations?: unknown[]; agentSwitch?: string; exit?: boolean }> {
+	const session = await startCodeReviewBrowserSession(ctx, options);
+	return session.waitForDecision();
+}
+
+export async function startCodeReviewBrowserSession(
+	ctx: ExtensionContext,
+	options: { cwd?: string; defaultBranch?: string; diffType?: DiffType; prUrl?: string } = {},
+): Promise<
+	BrowserDecisionSession<{
+		approved: boolean;
+		feedback?: string;
+		annotations?: unknown[];
+		agentSwitch?: string;
+		exit?: boolean;
+	}>
+> {
 	if (!ctx.hasUI || !reviewHtmlContent) {
 		throw new Error("Plannotator code review browser is unavailable in this session.");
 	}
@@ -181,7 +224,9 @@ export async function openCodeReview(
 	let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
 	let diffType: DiffType | undefined;
 	let agentCwd: string | undefined;
+	let initialBase: string | undefined;
 	let worktreeCleanup: (() => void | Promise<void>) | undefined;
+	let worktreePool: WorktreePool | undefined;
 	let exitHandler: (() => void) | undefined;
 
 	if (isPRMode && urlArg) {
@@ -217,13 +262,16 @@ export async function openCodeReview(
 
 		// Create local worktree for agent file access (--local is the default for PR reviews)
 		let localPath: string | undefined;
+		let sessionDir: string | undefined;
 		try {
 			const repoDir = options.cwd ?? ctx.cwd;
 			const identifier = prMetadata.platform === "github"
 				? `${prMetadata.owner}-${prMetadata.repo}-${prMetadata.number}`
 				: `${prMetadata.projectPath.replace(/\//g, "-")}-${prMetadata.iid}`;
 			const suffix = Math.random().toString(36).slice(2, 8);
-			localPath = join(realpathSync(tmpdir()), `plannotator-pr-${identifier}-${suffix}`);
+			const prNumber = prMetadata.platform === "github" ? prMetadata.number : prMetadata.iid;
+			sessionDir = join(realpathSync(tmpdir()), `plannotator-pr-${identifier}-${suffix}`);
+			localPath = join(sessionDir, "pool", `pr-${prNumber}`);
 			const fetchRefStr = prMetadata.platform === "github"
 				? `refs/pull/${prMetadata.number}/head`
 				: `refs/merge-requests/${prMetadata.iid}/head`;
@@ -265,14 +313,19 @@ export async function openCodeReview(
 					cwd: repoDir,
 				});
 
-				const worktreePath = localPath;
 				const wtRepoDir = repoDir;
 				exitHandler = () => {
-					try { spawnSync("git", ["worktree", "remove", "--force", worktreePath], { cwd: wtRepoDir }); } catch {}
+					try {
+						for (const entry of worktreePool?.entries() ?? []) {
+							spawnSync("git", ["worktree", "remove", "--force", entry.path], { cwd: wtRepoDir });
+						}
+					} catch {}
+					if (sessionDir) try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
 				};
-				worktreeCleanup = () => {
+				worktreeCleanup = async () => {
 					if (exitHandler) { process.removeListener("exit", exitHandler); exitHandler = undefined; }
-					return removeWorktree(reviewRuntime, worktreePath, { force: true, cwd: wtRepoDir });
+					if (worktreePool) await worktreePool.cleanup(reviewRuntime);
+					if (sessionDir) try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
 				};
 				process.once("exit", exitHandler);
 			} else {
@@ -311,25 +364,29 @@ export async function openCodeReview(
 				await reviewRuntime.runGit(["branch", "--", prMetadata.baseBranch, prMetadata.baseSha], { cwd: localPath });
 				await reviewRuntime.runGit(["update-ref", `refs/remotes/origin/${prMetadata.baseBranch}`, prMetadata.baseSha], { cwd: localPath });
 
-				const clonePath = localPath;
 				exitHandler = () => {
-					try { rmSync(clonePath, { recursive: true, force: true }); } catch {}
+					if (sessionDir) try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
 				};
 				worktreeCleanup = () => {
 					if (exitHandler) { process.removeListener("exit", exitHandler); exitHandler = undefined; }
-					try { rmSync(clonePath, { recursive: true, force: true }); } catch {}
+					if (sessionDir) try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
 				};
 				process.once("exit", exitHandler);
 			}
 
 			agentCwd = localPath;
+			worktreePool = createWorktreePool(
+				{ sessionDir: sessionDir!, repoDir, isSameRepo },
+				{ path: localPath, prUrl: prMetadata.url, number: prNumber, ready: true },
+			);
 			console.error(`Local checkout ready at ${localPath}`);
 		} catch (err) {
 			console.error("Warning: local worktree creation failed, falling back to remote diff");
 			console.error(err instanceof Error ? err.message : String(err));
 			if (exitHandler) { process.removeListener("exit", exitHandler); exitHandler = undefined; }
-			if (localPath) try { rmSync(localPath, { recursive: true, force: true }); } catch {}
+			if (sessionDir) try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
 			agentCwd = undefined;
+			worktreePool = undefined;
 			worktreeCleanup = undefined;
 		}
 	} else {
@@ -337,11 +394,18 @@ export async function openCodeReview(
 		const cwd = options.cwd ?? ctx.cwd;
 		gitCtx = await getGitContext(cwd);
 		const defaultBranch = options.defaultBranch ?? gitCtx.defaultBranch;
-		diffType = options.diffType ?? resolveDefaultDiffType(loadConfig());
-		const result = await runGitDiff(diffType, defaultBranch, cwd);
+		const config = loadConfig();
+		diffType = options.diffType ?? resolveDefaultDiffType(config);
+		const result = await runGitDiff(diffType, defaultBranch, cwd, {
+			hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+		});
 		rawPatch = result.patch;
 		gitRef = result.label;
 		diffError = result.error;
+		// Remember which base the initial diff was computed against so it can
+		// be forwarded to the server below. Only matters when the caller
+		// overrode the detected default; otherwise it matches gitCtx already.
+		initialBase = defaultBranch;
 	}
 
 	const server = await startReviewServer({
@@ -351,8 +415,10 @@ export async function openCodeReview(
 		origin: "pi",
 		diffType,
 		gitContext: gitCtx,
+		initialBase,
 		prMetadata,
 		agentCwd,
+		worktreePool,
 		htmlContent: reviewHtmlContent,
 		sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
@@ -360,7 +426,7 @@ export async function openCodeReview(
 		onCleanup: worktreeCleanup,
 	});
 
-	return openBrowserAndWait(server, ctx, server.waitForDecision);
+	return startBrowserDecisionSession(server, ctx, server.waitForDecision);
 }
 
 export async function openMarkdownAnnotation(
@@ -370,7 +436,32 @@ export async function openMarkdownAnnotation(
 	mode: AnnotateMode,
 	folderPath?: string,
 	sourceInfo?: string,
-): Promise<{ feedback: string; exit?: boolean }> {
+	sourceConverted?: boolean,
+	gate?: boolean,
+): Promise<{ feedback: string; exit?: boolean; approved?: boolean }> {
+	const session = await startMarkdownAnnotationSession(
+		ctx,
+		filePath,
+		markdown,
+		mode,
+		folderPath,
+		sourceInfo,
+		sourceConverted,
+		gate,
+	);
+	return session.waitForDecision();
+}
+
+export async function startMarkdownAnnotationSession(
+	ctx: ExtensionContext,
+	filePath: string,
+	markdown: string,
+	mode: AnnotateMode,
+	folderPath?: string,
+	sourceInfo?: string,
+	sourceConverted?: boolean,
+	gate?: boolean,
+): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean }>> {
 	if (!ctx.hasUI || !planHtmlContent) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
 	}
@@ -394,20 +485,40 @@ export async function openMarkdownAnnotation(
 		mode,
 		folderPath,
 		sourceInfo,
+		sourceConverted,
+		gate,
 		htmlContent: planHtmlContent,
 		sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
 		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
 	});
 
-	return openBrowserAndWait(server, ctx, server.waitForDecision);
+	return startBrowserDecisionSession(server, ctx, server.waitForDecision);
 }
 
 export async function openLastMessageAnnotation(
 	ctx: ExtensionContext,
 	lastText: string,
-): Promise<{ feedback: string; exit?: boolean }> {
-	return openMarkdownAnnotation(ctx, "last-message", lastText, "annotate-last");
+	gate?: boolean,
+): Promise<{ feedback: string; exit?: boolean; approved?: boolean }> {
+	return openMarkdownAnnotation(ctx, "last-message", lastText, "annotate-last", undefined, undefined, undefined, gate);
+}
+
+export async function startLastMessageAnnotationSession(
+	ctx: ExtensionContext,
+	lastText: string,
+	gate?: boolean,
+): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean }>> {
+	return startMarkdownAnnotationSession(
+		ctx,
+		"last-message",
+		lastText,
+		"annotate-last",
+		undefined,
+		undefined,
+		undefined,
+		gate,
+	);
 }
 
 export async function openArchiveBrowserAction(
