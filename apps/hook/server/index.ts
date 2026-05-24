@@ -1,5 +1,5 @@
 /**
- * Plannotator CLI for Claude Code, Codex, Gemini CLI, and Copilot CLI
+ * Plannotator CLI for Claude Code, Droid, Codex, Gemini CLI, and Copilot CLI
  *
  * Supports nine modes:
  *
@@ -105,9 +105,12 @@ import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { AGENT_CONFIG, type Origin } from "@plannotator/shared/agents";
 import {
+  findDroidSessionLogsByAncestorWalk,
+  findDroidSessionLogsForCwd,
   findSessionLogsByAncestorWalk,
   findSessionLogsForCwd,
   getLastRenderedMessage,
+  resolveDroidSessionLogForCwd,
   resolveSessionLogByAncestorPids,
   resolveSessionLogByCwdScan,
   type RenderedMessage,
@@ -258,6 +261,7 @@ const pasteApiUrl = process.env.PLANNOTATOR_PASTE_URL || undefined;
 // Detect calling agent from environment variables set by agent runtimes.
 // Priority:
 //   PLANNOTATOR_ORIGIN (explicit override, validated against AGENT_CONFIG)
+//   > Droid command wrappers (PLANNOTATOR_ORIGIN=droid)
 //   > Codex (CODEX_THREAD_ID)
 //   > Copilot CLI (COPILOT_CLI)
 //   > OpenCode (OPENCODE)
@@ -843,6 +847,7 @@ if (args[0] === "sessions") {
   const projectRoot = process.env.PLANNOTATOR_CWD || process.cwd();
   const codexThreadId = process.env.CODEX_THREAD_ID;
   const isCodex = !!codexThreadId;
+  const isDroid = detectedOrigin === "droid";
 
   let lastMessage: RenderedMessage | null = null;
 
@@ -860,6 +865,36 @@ if (args[0] === "sessions") {
       if (msg) {
         lastMessage = { messageId: codexThreadId, text: msg.text, lineNumbers: [] };
       }
+    }
+  } else if (isDroid) {
+    // Droid/Factory path: resolve the current repo's session log from
+    // ~/.factory/sessions/<cwd-slug>/*.jsonl. Factory does not expose the same
+    // per-process session metadata files as Claude Code, so the best available
+    // selector is "newest current-session candidate for this cwd", with an
+    // ancestor walk fallback for users who `cd` into a subdirectory after
+    // session start.
+    if (process.env.PLANNOTATOR_DEBUG) {
+      console.error(`[DEBUG] Droid detected, project root: ${projectRoot}`);
+    }
+
+    const cwdLogs = findDroidSessionLogsForCwd(projectRoot);
+    const ancestorLogs = cwdLogs.length === 0
+      ? findDroidSessionLogsByAncestorWalk(projectRoot)
+      : [];
+
+    if (process.env.PLANNOTATOR_DEBUG) {
+      console.error(`[DEBUG] Droid CWD session logs (mtime): ${cwdLogs.length ? cwdLogs.join(", ") : "(none)"}`);
+      if (cwdLogs.length === 0) {
+        console.error(`[DEBUG] Droid ancestor walk: ${ancestorLogs.length ? ancestorLogs.join(", ") : "(none)"}`);
+      }
+    }
+
+    const droidLog = resolveDroidSessionLogForCwd(projectRoot);
+    if (process.env.PLANNOTATOR_DEBUG) {
+      console.error(`[DEBUG] Droid selected log: ${droidLog ?? "(none)"}`);
+    }
+    if (droidLog) {
+      lastMessage = getLastRenderedMessage(droidLog);
     }
   } else {
     // Claude Code path: resolve session log
@@ -920,10 +955,11 @@ if (args[0] === "sessions") {
     console.error(`[DEBUG] Found message ${lastMessage.messageId} (${lastMessage.text.length} chars)`);
   }
 
+  const annotatedMessage = lastMessage;
   const annotateProject = (await detectProjectName()) ?? "_unknown";
 
   const server = await startAnnotateServer({
-    markdown: lastMessage.text,
+    markdown: annotatedMessage.text,
     filePath: "last-message",
     origin: detectedOrigin,
     mode: "annotate-last",
@@ -936,7 +972,7 @@ if (args[0] === "sessions") {
       handleAnnotateServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled) {
-        await writeRemoteShareLink(lastMessage.text, shareBaseUrl, "annotate", "message only").catch(() => {});
+        await writeRemoteShareLink(annotatedMessage.text, shareBaseUrl, "annotate", "message only").catch(() => {});
       }
     },
   });
