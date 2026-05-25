@@ -20,8 +20,8 @@ import type {
 } from "../types.ts";
 import { registerProviderFactory } from "../provider.ts";
 import {
+	buildWindowsCommandScriptSpawnCommand,
 	resolveWindowsCommandShim,
-	shouldSpawnViaShell,
 } from "./command-path.ts";
 
 // Re-export mapPiEvent from shared (runtime-agnostic)
@@ -51,12 +51,18 @@ class PiProcessNode {
 
 	async spawn(piPath: string, cwd: string): Promise<void> {
 		const commandPath = resolveWindowsCommandShim(piPath);
+		const command =
+			buildWindowsCommandScriptSpawnCommand(commandPath, ["--mode", "rpc"]) ?? [
+				commandPath,
+				"--mode",
+				"rpc",
+			];
 		let proc: ChildProcess;
 		try {
-			proc = spawn(commandPath, ["--mode", "rpc"], {
+			const [file, ...args] = command;
+			proc = spawn(file, args, {
 				cwd,
 				stdio: ["pipe", "pipe", "pipe"],
-				shell: shouldSpawnViaShell(commandPath),
 			});
 		} catch (err) {
 			const error = err instanceof Error ? err : new Error(String(err));

@@ -8,6 +8,29 @@ function writeText(path: string, content: string): void {
 	writeFileSync(path, content.replace(/\n/g, "\r\n"), "utf-8");
 }
 
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function removeTempDirBestEffort(path: string): Promise<void> {
+	for (let attempt = 0; attempt < 8; attempt++) {
+		try {
+			rmSync(path, { recursive: true, force: true });
+			return;
+		} catch (error) {
+			if (attempt === 7) {
+				console.warn(
+					`Warning: failed to remove smoke temp dir ${path}: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				);
+				return;
+			}
+			await sleep(250);
+		}
+	}
+}
+
 async function main(): Promise<void> {
 	if (process.platform !== "win32") {
 		console.log("Skipping Pi extension AI runtime smoke: Windows-only.");
@@ -73,7 +96,7 @@ rl.on("line", (line) => {
           { provider: "fake", id: "windows-smoke", name: "Windows smoke" }
         ]
       }
-    }) + "\\n");
+    }) + "\\n", () => process.exit(0));
     return;
   }
   process.stdout.write(JSON.stringify({
@@ -130,7 +153,7 @@ rl.on("line", (line) => {
 		}
 	} finally {
 		process.env[pathEnvKey] = originalPath;
-		rmSync(tempDir, { recursive: true, force: true });
+		await removeTempDirBestEffort(tempDir);
 	}
 }
 
