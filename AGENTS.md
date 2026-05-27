@@ -11,23 +11,19 @@ plannotator/
 │   │   ├── .claude-plugin/plugin.json
 │   │   ├── commands/             # Slash commands (plannotator-review.md, plannotator-annotate.md)
 │   │   ├── hooks/hooks.json      # PermissionRequest hook config
-│   │   ├── server/index.ts       # Entry point (plan + review + annotate + archive subcommands)
-│   │   └── dist/                 # Built single-file apps (index.html, review.html)
-│   ├── opencode-plugin/          # OpenCode plugin
+│   │   └── server/index.ts       # CLI entry point (daemon client, session orchestration)
+│   ├── frontend/                  # Production frontend SPA (daemon shell)
+│   │   ├── src/                   # React app with TanStack Router
+│   │   └── vite.config.ts         # Single-file HTML build
+│   ├── opencode-plugin/          # OpenCode plugin (binary client wrapper)
 │   │   ├── commands/             # Slash commands (plannotator-review.md, plannotator-annotate.md)
-│   │   ├── index.ts              # Plugin entry with submit_plan tool + review/annotate event handlers
-│   │   ├── plannotator.html      # Built plan review app
-│   │   └── review-editor.html    # Built code review app
+│   │   └── index.ts              # Plugin entry — spawns plannotator binary
 │   ├── marketing/                # Marketing site, docs, and blog (plannotator.ai)
 │   │   └── astro.config.mjs      # Astro 5 static site with content collections
 │   ├── paste-service/            # Paste service for short URL sharing
 │   │   ├── core/                 # Platform-agnostic logic (handler, storage interface, cors)
 │   │   ├── stores/               # Storage backends (fs, kv, s3)
 │   │   └── targets/              # Deployment entries (bun.ts, cloudflare.ts)
-│   ├── review/                   # Standalone review server (for development)
-│   │   ├── index.html
-│   │   ├── index.tsx
-│   │   └── vite.config.ts
 │   ├── vscode-extension/         # VS Code extension — opens plans in editor tabs
 │   │   ├── bin/                   # Router scripts (open-in-vscode, xdg-open)
 │   │   ├── src/                   # extension.ts, cookie-proxy.ts, ipc-server.ts, panel-manager.ts, editor-annotations.ts, vscode-theme.ts
@@ -41,16 +37,15 @@ plannotator/
 │       └── plannotator-visual-explainer/ # Visual HTML generator (plans, diagrams, PR explainers) with Plannotator theming
 ├── packages/
 │   ├── server/                   # Shared server implementation
-│   │   ├── index.ts              # startPlannotatorServer(), handleServerReady()
-│   │   ├── review.ts             # startReviewServer(), handleReviewServerReady()
-│   │   ├── annotate.ts           # startAnnotateServer(), handleAnnotateServerReady()
+│   │   ├── index.ts              # createPlannotatorSession(), handleServerReady()
+│   │   ├── review.ts             # createReviewSession(), handleReviewServerReady()
+│   │   ├── annotate.ts           # createAnnotateSession(), handleAnnotateServerReady()
 │   │   ├── daemon/               # Long-running daemon runtime, state, client, and session store
 │   │   ├── storage.ts            # Re-exports from @plannotator/shared/storage
 │   │   ├── share-url.ts          # Server-side share URL generation for remote sessions
 │   │   ├── remote.ts             # isRemoteSession(), getServerPort()
 │   │   ├── browser.ts            # openBrowser()
 │   │   ├── draft.ts              # Re-exports from @plannotator/shared/draft
-│   │   ├── integrations.ts       # Obsidian, Bear integrations
 │   │   ├── ide.ts                # VS Code diff integration (openEditorDiff)
 │   │   ├── editor-annotations.ts  # VS Code editor annotation endpoints
 │   │   └── project.ts            # Project name detection for tags
@@ -59,48 +54,60 @@ plannotator/
 │   │   ├── components/           # Viewer, Toolbar, Settings, etc.
 │   │   │   ├── icons/            # Shared SVG icon components (themeIcons, etc.)
 │   │   │   ├── plan-diff/        # PlanDiffBadge, PlanDiffViewer, clean/raw diff views
-│   │   │   └── sidebar/          # SidebarContainer, SidebarTabs, VersionBrowser, ArchiveBrowser
+│   │   │   └── sidebar/          # SidebarContainer, SidebarTabs, VersionBrowser
 │   │   ├── shortcuts/            # Keyboard shortcut registry (see Keyboard Shortcuts section below)
 │   │   │   ├── core.ts           # Engine: parser, formatter, dispatcher, validator
 │   │   │   ├── runtime.ts        # Engine: useShortcutScope, useDoubleTapShortcuts hooks
 │   │   │   ├── index.ts          # Barrel — re-exports engine + scopes from both subfolders
 │   │   │   ├── plan-review/      # Scopes for plan-editor surfaces (annotationToolbar, annotationPanel, commentPopover, imageAnnotator, inputMethod, viewer)
-│   │   │   └── code-review/      # Scopes for review-editor surfaces (ai, allFilesDiff, annotationToolbar, fileTree, prComments, suggestionModal, tourDialog)
+│   │   │   └── code-review/      # Scopes for code-review surfaces (ai, allFilesDiff, annotationToolbar, fileTree, prComments, suggestionModal, tourDialog)
 │   │   ├── shortcuts.test.ts     # Registry unit tests (parser, dispatcher, validator)
 │   │   ├── utils/                # parser.ts, sharing.ts, storage.ts, planSave.ts, agentSwitch.ts, planDiffEngine.ts, planAgentInstructions.ts
-│   │   ├── hooks/                # useAnnotationHighlighter.ts, useSharing.ts, usePlanDiff.ts, useSidebar.ts, useLinkedDoc.ts, useAnnotationDraft.ts, useCodeAnnotationDraft.ts, useArchive.ts
+│   │   ├── hooks/                # useAnnotationHighlighter.ts, useSharing.ts, usePlanDiff.ts, useSidebar.ts, useLinkedDoc.ts, useAnnotationDraft.ts, useCodeAnnotationDraft.ts
 │   │   └── types.ts
 │   ├── ai/                       # Provider-agnostic AI backbone (providers, sessions, endpoints)
 │   ├── shared/                   # Shared types, utilities, and cross-runtime logic
-│   │   ├── storage.ts            # Plan saving, version history, archive listing (node:fs only)
+│   │   ├── storage.ts            # Plan saving, version history (node:fs only)
 │   │   ├── draft.ts              # Annotation draft persistence (node:fs only)
 │   │   ├── project.ts            # Pure string helpers (sanitizeTag, extractRepoName, extractDirName)
 │   │   ├── plugin-protocol.ts    # JSON protocol for binary-owned plugin commands
 │   │   ├── plugin-client.ts      # Shared OpenCode/Pi subprocess client for plannotator plugin commands
 │   │   └── plugin-binary.ts      # Binary discovery, compatibility checks, and installer bridge
-│   ├── editor/                   # Plan review app
+│   ├── plannotator-plan-review/   # Plan review app (embedded in frontend)
 │   │   ├── App.tsx               # Main plan review app
-│   │   └── shortcuts.ts          # planReviewSurface + annotateSurface — composes plan-review scopes into per-surface registries
-│   └── review-editor/            # Code review UI
+│   │   └── shortcuts.ts          # planReviewSurface + annotateSurface
+│   └── plannotator-code-review/  # Code review UI (embedded in frontend)
 │       ├── App.tsx               # Main review app
-│       ├── shortcuts.ts          # codeReviewSurface — composes code-review scopes into the review registry
+│       ├── shortcuts.ts          # codeReviewSurface
 │       ├── components/           # DiffViewer, FileTree, ReviewSidebar
 │       ├── dock/                 # Dockview center panel infrastructure
-│       ├── demoData.ts           # Demo diff for standalone mode
-│       └── index.css             # Review-specific styles
+│       └── store/                # Zustand review store (annotations, files, diff options)
 ├── .claude-plugin/marketplace.json  # For marketplace install
 └── legacy/                       # Old pre-monorepo code (reference only)
 ```
 
-## Server Runtimes
+## Architecture
 
-Plannotator has one server implementation:
+The `plannotator` binary is the only server. One server, one frontend, many entry points.
 
-- **Bun server** (`packages/server/`) — owns plan review, code review, annotate, archive, and shared browser APIs.
+```
+Host app (Claude Code / OpenCode / Pi / Codex / Copilot / Gemini CLI)
+  → thin wrapper (hook, extension, plugin)
+    → plannotator binary (CLI)
+      → daemon (one per machine)
+        → frontend (browser)
+```
 
-Claude Code runs this server through the released `plannotator` binary entrypoint. OpenCode and Pi do not package their own server implementations; they call the same binary through the plugin protocol in `packages/shared/plugin-protocol.ts`. Runtime-agnostic logic (store, validation, types) lives in `packages/shared/`.
+- The binary either starts a daemon or connects to one already running. The daemon serves the frontend.
+- Claude Code calls the binary directly via hooks. OpenCode, Pi, Codex, Copilot, and Gemini CLI call it via thin extension/plugin wrappers that spawn the binary as a subprocess.
+- Extensions and plugins have no server logic of their own. They translate "my host app wants to do X" into "shell out to `plannotator`."
+- The frontend (`apps/frontend/`) is the only UI.
 
-Daemon-backed commands run through one long-running `plannotator` process per user/machine environment. `plannotator daemon start|status|stop` manage that lifecycle, while normal plan/review/annotate/archive commands auto-start a compatible daemon and create session-scoped browser URLs at `/s/<sessionId>`. Browser API calls must use `/s/<sessionId>/api/...`; root `/api/...` routes are not a daemon session boundary.
+## Server Implementation
+
+Server logic lives in `packages/server/`. Runtime-agnostic logic (store, validation, types) lives in `packages/shared/`. The plugin protocol for extensions is in `packages/shared/plugin-protocol.ts` and `plugin-client.ts`.
+
+Daemon-backed commands run through one long-running `plannotator` process per user/machine environment. `plannotator daemon start|status|stop` manage that lifecycle, while normal plan/review/annotate commands auto-start a compatible daemon and create session-scoped browser URLs at `/s/<sessionId>`. Browser API calls must use `/s/<sessionId>/api/...`; root `/api/...` routes are not a daemon session boundary.
 
 ## Installation
 
@@ -202,34 +209,18 @@ User annotates content, provides feedback
 Send Annotations → feedback sent to agent session
 ```
 
-## Archive Flow
-
-```
-User runs plannotator archive (CLI) or /plannotator-archive (Pi)
-        ↓
-Server starts in mode:"archive", reads ~/.plannotator/plans/
-        ↓
-Browser opens read-only archive viewer (sharing disabled)
-        ↓
-User browses saved plan decisions with approved/denied badges
-        ↓
-Done → POST /api/done closes the browser
-```
-
-During normal plan review, an Archive sidebar tab provides the same browsing via linked doc overlay without leaving the current session.
-
 ## Server API
 
 ### Daemon Runtime (`packages/server/daemon/`)
 
-The daemon is the single long-running Bun server used by normal plan/review/annotate/archive commands. It owns a session store and exposes browser sessions at `/s/<sessionId>`. Session browser APIs are scoped under `/s/<sessionId>/api/...`; root `/api/...` is not a valid daemon session API boundary.
+The daemon is the single long-running Bun server used by normal plan/review/annotate commands. It owns a session store and exposes browser sessions at `/s/<sessionId>`. Session browser APIs are scoped under `/s/<sessionId>/api/...`; root `/api/...` is not a valid daemon session API boundary.
 
 | Endpoint              | Method | Purpose                                    |
 | --------------------- | ------ | ------------------------------------------ |
 | `/daemon/capabilities` | GET | Return daemon protocol/capability metadata |
 | `/daemon/status` | GET | Return daemon process, endpoint, and session counts |
 | `/daemon/sessions` | GET | List active sessions (`?clean=1` also reaps expired sessions before listing) |
-| `/daemon/sessions` | POST | Create a plan/review/annotate/archive session from a plugin-protocol request |
+| `/daemon/sessions` | POST | Create a plan/review/annotate session from a plugin-protocol request |
 | `/daemon/sessions/:id` | GET | Fetch a session summary |
 | `/daemon/sessions/:id/result` | GET | Wait for a session decision/result |
 | `/daemon/sessions/:id/cancel` | POST | Cancel a session and dispose its resources |
@@ -238,8 +229,6 @@ The daemon is the single long-running Bun server used by normal plan/review/anno
 | `/daemon/config` | GET | Read global config (`~/.plannotator/config.json`) |
 | `/daemon/config` | POST | Write global config keys (allowlisted: `displayName`, `pfmReminder`, `legacyTabMode`, `diffOptions`, `conventionalComments`, `conventionalLabels`) |
 | `/daemon/git/user` | GET | Return git user name from `git config user.name` |
-| `/daemon/vaults` | GET | Detect available Obsidian vaults |
-| `/daemon/obsidian/vaults` | GET | Alias for `/daemon/vaults` |
 | `/daemon/hooks/status` | GET | Return PFM reminder and improvement hook status |
 | `/daemon/projects` | DELETE | Remove a project by `?cwd=` (optional `?clean=1` to cancel active sessions) |
 | `/daemon/projects/prs` | GET | List open PRs for a project (`?cwd=`) |
@@ -267,19 +256,13 @@ When a user denies a plan (or sends feedback on a review/annotation), the sessio
 
 | Endpoint              | Method | Purpose                                    |
 | --------------------- | ------ | ------------------------------------------ |
-| `/api/plan`           | GET    | Returns `{ plan, origin, previousPlan, versionInfo }` (plan mode) or `{ plan, origin, mode: "archive", archivePlans }` (archive mode) |
+| `/api/plan`           | GET    | Returns `{ plan, origin, previousPlan, versionInfo }` |
 | `/api/plan/version`   | GET    | Fetch specific version (`?v=N`)            |
 | `/api/plan/versions`  | GET    | List all versions of current plan          |
-| `/api/archive/plans`  | GET    | List archived plan decisions (`?customPath=`) |
-| `/api/archive/plan`   | GET    | Fetch archived plan content (`?filename=&customPath=`) |
-| `/api/done`           | POST   | Close archive browser (archive mode only)  |
-| `/api/approve`        | POST   | Approve plan (body: planSave, agentSwitch, obsidian, bear, feedback) |
+| `/api/approve`        | POST   | Approve plan (body: planSave, agentSwitch, feedback) |
 | `/api/deny`           | POST   | Deny plan (body: feedback, planSave)       |
 | `/api/image`          | GET    | Serve image by path query param            |
 | `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
-| `/api/obsidian/vaults`| GET    | Detect available Obsidian vaults           |
-| `/api/reference/obsidian/files` | GET | List vault markdown files as nested tree (`?vaultPath=<path>`) |
-| `/api/reference/obsidian/doc`   | GET | Read a vault markdown file (`?vaultPath=<path>&path=<file>`) |
 | `/api/plan/vscode-diff` | POST   | Open diff in VS Code (body: baseVersion)   |
 | `/api/doc`              | GET    | Serve linked .md/.mdx file (`?path=<path>`) |
 | `/api/doc/exists`       | POST   | Batch-validate code-file paths (body: `{ paths: string[], base?: string }`) returns `{ results: { [path]: { status: "found"\|"ambiguous"\|"missing"\|"unavailable", … } } }` |
@@ -383,7 +366,7 @@ When a user denies a plan and Claude resubmits, the UI shows what changed betwee
 
 **Annotation hook** (`packages/ui/hooks/useAnnotationHighlighter.ts`): Annotation infrastructure used by `Viewer.tsx`. Manages web-highlighter lifecycle, toolbar/popover state, annotation creation, text-based restoration, and scroll-to-selected. The diff view uses its own block-level hover system instead.
 
-**Sidebar** (`packages/ui/hooks/useSidebar.ts`): Shared left sidebar with three tabs — Table of Contents, Version Browser, and Archive. The "Auto-open Sidebar" setting controls whether it opens on load (TOC tab only). In archive mode, the sidebar opens to the Archive tab automatically.
+**Sidebar** (`packages/ui/hooks/useSidebar.ts`): Shared left sidebar with tabs — Table of Contents, Version Browser, and File Browser. The "Auto-open Sidebar" setting controls whether it opens on load (TOC tab only).
 
 ## Data Types
 
@@ -457,13 +440,13 @@ Text highlighting uses `web-highlighter` library. Code blocks use manual `<mark>
 
 ## Keyboard Shortcuts
 
-**Location:** `packages/ui/shortcuts/` (engine + scope data), `packages/editor/shortcuts.ts` and `packages/review-editor/shortcuts.ts` (per-app surfaces).
+**Location:** `packages/ui/shortcuts/` (engine + scope data), `packages/plannotator-plan-review/shortcuts.ts` and `packages/plannotator-code-review/shortcuts.ts` (per-app surfaces).
 
 The shortcut system has three layers:
 
 1. **Engine** (`packages/ui/shortcuts/{core,runtime}.ts`) — parser for declarative bindings (`Mod+Enter`, `Alt Alt` double-tap, `Alt hold`), dispatcher, platform-aware formatter (mac glyphs vs. `Ctrl`), validator, and the `useShortcutScope` / `useDoubleTapShortcuts` React hooks. Truly shared — both apps use it as-is.
 2. **Scopes** — `defineShortcutScope({ id, title, shortcuts: { actionId: { bindings, description, section, ... } } })`. One scope per UI surface (annotation toolbar, comment popover, file tree, etc.). Lives in `packages/ui/shortcuts/{plan-review,code-review}/` — **the subfolder names which app's UI the scope serves**. Components/Apps wire handlers to a scope via `useShortcutScope({ scope, handlers: { actionId: () => ... } })`.
-3. **Surfaces** (`packages/editor/shortcuts.ts`, `packages/review-editor/shortcuts.ts`) — each app composes its scopes into a `ShortcutSurface` (`planReviewSurface`, `annotateSurface`, `codeReviewSurface`). Surfaces feed both the in-app help modal and the marketing site's auto-generated docs page.
+3. **Surfaces** (`packages/plannotator-plan-review/shortcuts.ts`, `packages/plannotator-code-review/shortcuts.ts`) — each app composes its scopes into a `ShortcutSurface` (`planReviewSurface`, `annotateSurface`, `codeReviewSurface`). Surfaces feed both the in-app help modal and the marketing site's auto-generated docs page.
 
 **Convention for adding new shortcuts:** define the action in the relevant scope file under the right subfolder (`plan-review/` or `code-review/`), declare the binding(s) and description, then wire a handler at the call site with `useShortcutScope`. The marketing docs page picks it up automatically at next build. Unit tests in `packages/ui/shortcuts.test.ts` enforce normalized binding tokens (`Mod`, `Shift`, `Alt`, `A-Z`, `1-0`, named keys, `F1`–`F12`) and unique scope ids.
 
@@ -533,8 +516,7 @@ Code blocks use bundled `highlight.js`. Language is extracted from fence (```rus
 bun install
 
 # Run any app
-bun run dev:hook       # Hook server (plan review)
-bun run dev:review     # Review editor (code review)
+bun run dev:frontend   # Frontend + daemon dev server
 bun run dev:portal     # Portal editor
 bun run dev:marketing  # Marketing site
 bun run dev:vscode     # VS Code extension (watch mode)
@@ -543,9 +525,8 @@ bun run dev:vscode     # VS Code extension (watch mode)
 ## Build
 
 ```bash
-bun run build:hook       # Single-file HTML for hook server
-bun run build:review     # Code review editor
-bun run build:opencode   # OpenCode plugin (copies HTML from hook + review)
+bun run build:hook       # Builds the frontend, then the binary embeds it
+bun run build:opencode   # OpenCode plugin
 bun run build:portal     # Static build for share.plannotator.ai
 bun run build:marketing  # Static build for plannotator.ai
 bun run build:vscode     # VS Code extension bundle
@@ -555,22 +536,12 @@ bun run build            # Build hook + opencode (main targets)
 
 **Important: Tailwind `@source` paths.** When creating new directories that contain `.tsx` files with Tailwind classes, add a matching `@source` entry to the app's `index.css`. Tailwind only generates CSS for classes it finds in scanned files — missing paths means classes appear in the DOM but have no effect.
 
-**Important: Build order matters.** The hook build (`build:hook`) copies pre-built HTML from `apps/review/dist/`. If you change UI code in `packages/ui/`, `packages/editor/`, or `packages/review-editor/`, you **must** rebuild the review app first, then the hook:
+The hook build (`build:hook`) builds the frontend app (`apps/frontend/`) into a single-file HTML, which the daemon embeds and serves. When testing locally with a compiled binary:
 
 ```bash
-bun run --cwd apps/review build && bun run build:hook   # For review UI changes
-bun run build:hook                                       # For plan UI changes only
-bun run build:hook && bun run build:opencode             # For OpenCode plugin
-```
-
-Running only `build:hook` after review-editor changes will copy stale HTML files. When testing locally with a compiled binary, the full sequence is:
-
-```bash
-bun run --cwd apps/review build && bun run build:hook && \
+bun run build:hook && \
   bun build apps/hook/server/index.ts --compile --outfile ~/.local/bin/plannotator
 ```
-
-Running only `build:opencode` will copy stale HTML files.
 
 ## Marketing Site
 

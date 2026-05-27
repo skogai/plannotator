@@ -19,7 +19,6 @@
     "./project": "./project.ts",
     "./storage": "./storage.ts",
     "./draft": "./draft.ts",
-    "./integrations-common": "./integrations-common.ts",
     "./repo": "./repo.ts",
     "./reference-common": "./reference-common.ts",
     "./favicon": "./favicon.ts",
@@ -44,10 +43,7 @@
     "./annotate-args": "./annotate-args.ts",
     "./at-reference": "./at-reference.ts",
     "./code-nav": "./code-nav.ts",
-    "./goal-setup": "./goal-setup.ts",
-    "./plugin-protocol": "./plugin-protocol.ts",
-    "./plugin-binary": "./plugin-binary.ts",
-    "./plugin-client": "./plugin-client.ts"
+    "./goal-setup": "./goal-setup.ts"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.64",

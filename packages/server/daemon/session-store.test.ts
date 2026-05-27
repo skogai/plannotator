@@ -88,7 +88,6 @@ describe("DaemonSessionStore", () => {
       url: "http://x/s/s1",
       project: "repo",
       label: "review",
-      htmlContent: "<html></html>",
       handleRequest: () => new Response("ok"),
       dispose: () => { disposed = true; },
     });
@@ -104,7 +103,6 @@ describe("DaemonSessionStore", () => {
     expect(store.activeCount()).toBe(0);
     expect(store.list()).toEqual([]);
     expect(disposed).toBe(true);
-    expect(store.get("s1")?.htmlContent).toBeUndefined();
     expect(store.get("s1")?.handleRequest).toBeUndefined();
     expect(store.get("s1")?.dispose).toBeUndefined();
   });
@@ -117,7 +115,6 @@ describe("DaemonSessionStore", () => {
       url: "http://x/s/s1",
       project: "repo",
       label: "review",
-      htmlContent: "<html></html>",
       handleRequest: () => new Response("ok"),
       dispose: () => { disposed = true; },
     });
@@ -128,7 +125,6 @@ describe("DaemonSessionStore", () => {
     expect(result.status).toBe("failed");
     expect(result.error).toBe("Boom.");
     expect(disposed).toBe(true);
-    expect(store.get("s1")?.htmlContent).toBeUndefined();
     expect(store.get("s1")?.handleRequest).toBeUndefined();
   });
 
@@ -157,10 +153,10 @@ describe("DaemonSessionStore", () => {
     const store = new DaemonSessionStore({ idFactory: () => "s1", now: () => 1_000 });
     let disposed = false;
     store.create({
-      mode: "archive",
+      mode: "plan",
       url: "http://x/s/s1",
       project: "repo",
-      label: "archive",
+      label: "plan",
       ttlMs: 100,
       dispose: () => { disposed = true; },
     });

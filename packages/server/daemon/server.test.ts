@@ -5,7 +5,6 @@ import { DaemonSessionStore } from "./session-store";
 import { createDaemonFetchHandler } from "./server";
 
 const shellHtml = "<html><script>const shellLiteral='</head>';</script><head></head><body>Shell</body></html>";
-const legacyPlanHtml = "<html><head></head><body>Plan</body></html>";
 const AUTH_TOKEN = "test-auth-token-test-auth-token-1234";
 
 function authHeaders(headers?: HeadersInit): Headers {
@@ -49,7 +48,6 @@ function makeHandler() {
       url: `${state.baseUrl}/s/s1`,
       project: "repo",
       label: "plan-repo",
-      htmlContent: legacyPlanHtml,
       handleRequest: (_req, url) => Response.json({ path: url.pathname }),
     }),
   });
@@ -715,7 +713,7 @@ describe("daemon HTTP router", () => {
     expect(html.indexOf("window.__PLANNOTATOR_API_BASE__")).toBeLessThan(html.indexOf("<body>"));
   });
 
-  test.each(["plan", "review", "annotate", "archive", "goal-setup"] as const)(
+  test.each(["plan", "review", "annotate", "goal-setup"] as const)(
     "serves the same frontend shell for %s session pages",
     async (mode) => {
       const store = new DaemonSessionStore({ now: () => 1_000 });
@@ -734,7 +732,6 @@ describe("daemon HTTP router", () => {
         url: `${state.baseUrl}/s/${mode}`,
         project: "repo",
         label: `${mode}-repo`,
-        htmlContent: `<html><head></head><body>Legacy ${mode}</body></html>`,
       });
       const handler = createDaemonFetchHandler({
         state,
