@@ -170,14 +170,11 @@ DONE: Implemented `fetchGlMRList` and `fetchGlMRDetailedList` (`packages/shared/
 
 ---
 
-## configStore Zustand migration
+## ~~configStore Zustand migration~~ DONE
 
-**Priority:** Medium
-**Size:** Medium
+Shipped in PR #808 (`12d7bd27`). `packages/ui/config/configStore.ts` is now a `zustand/vanilla` store with selector-based subscriptions (only components reading a changed key re-render), replacing the hand-rolled broadcast-to-all pub-sub. `useConfigValue('key')` API unchanged; cookie persistence + 300ms debounced server sync identical. `AnnotationPanel` passes `isMe` as a prop (memo-safe) and `ReviewSidebar` subscribes to `displayName` directly.
 
-The custom `configStore` in `packages/ui/config/configStore.ts` is a hand-rolled pub-sub singleton. It works but doesn't integrate with the Zustand stores used elsewhere in the frontend. Migrating it to Zustand would unify state management and enable selector-based subscriptions instead of the current broadcast-to-all-listeners pattern.
-
-Scoped in `goals/performance/backlog/configstore-zustand-migration.md`.
+Originally scoped in `goals/performance/backlog/configstore-zustand-migration.md`.
 
 ---
 

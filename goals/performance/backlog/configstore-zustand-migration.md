@@ -1,5 +1,7 @@
 # ConfigStore → Zustand Migration
 
+> **STATUS: DONE** — shipped in PR #808 (`12d7bd27`). Implemented as a `zustand/vanilla` store with selector-based subscriptions; `useConfigValue` API, cookie persistence, and debounced server sync unchanged. The notes below are the original scoping plan, kept for reference.
+
 ## Problem
 
 The hand-rolled configStore broadcasts to ALL 63 subscribers when ANY setting changes. When a user changes their display name, 12 hidden code review components re-render to check if their diff style changed. With 5 sessions, that's 52 wasted re-renders from a single setting change.
