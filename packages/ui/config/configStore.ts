@@ -71,11 +71,11 @@ function resolveInitialValues(): Record<string, unknown> {
   return values;
 }
 
-export const configStore = createStore<ConfigState>()((set, get) => ({
+export const configStore = createStore<ConfigState>()((setState, getState) => ({
   ...resolveInitialValues() as { [K in SettingName]: SettingValue<K> },
 
   get: <K extends SettingName>(key: K): SettingValue<K> => {
-    return get()[key] as SettingValue<K>;
+    return getState()[key] as SettingValue<K>;
   },
 
   set: <K extends SettingName>(key: K, value: SettingValue<K>): void => {
@@ -87,7 +87,7 @@ export const configStore = createStore<ConfigState>()((set, get) => ({
       scheduleServerSync();
     }
 
-    set({ [key]: value } as Partial<ConfigState>);
+    setState({ [key]: value } as Partial<ConfigState>);
   },
 
   init: (serverConfig?: Record<string, unknown>): void => {
@@ -103,7 +103,7 @@ export const configStore = createStore<ConfigState>()((set, get) => ({
       }
     }
     if (Object.keys(updates).length > 0) {
-      set(updates as Partial<ConfigState>);
+      setState(updates as Partial<ConfigState>);
     }
   },
 }));

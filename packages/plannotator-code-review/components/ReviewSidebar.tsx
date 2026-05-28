@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { CodeAnnotation, type EditorAnnotation } from '@plannotator/ui/types';
 import { isCurrentUser } from '@plannotator/ui/utils/identity';
+import { useConfigValue } from '@plannotator/ui/config';
 import { EditorAnnotationCard } from '@plannotator/ui/components/EditorAnnotationCard';
 import { CopyButton } from './CopyButton';
 import { ConventionalLabelBadge } from './ConventionalLabelPicker';
@@ -143,6 +144,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   onOpenPRPanel,
 }) => {
   const totalCount = annotations.length + (editorAnnotations?.length ?? 0);
+  useConfigValue('displayName');
   const [copied, setCopied] = useState(false);
 
   const handleQuickCopy = async () => {
