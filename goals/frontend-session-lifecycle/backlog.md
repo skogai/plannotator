@@ -109,6 +109,17 @@ Move browser-opening logic from CLI to daemon. The daemon decides what to do bas
 
 ---
 
+## Notify the user when a session updates live
+
+**Priority:** Medium
+**Size:** Small
+
+When the agent resubmits (new diff for a review, revised plan, edited file), the content swaps in place via the `session-revision` WebSocket event and the submit buttons reappear — but there's **no visible signal** that the version changed under the user. If they're not staring at the screen, they can miss that the agent pushed a new version.
+
+Add an affordance when a `session-revision` arrives in an already-open session: e.g. a toast ("Agent pushed a new version"), a brief highlight/pulse on the diff, and/or a "what changed" marker. Applies to all three surfaces (code review, plan, annotate). Should respect tab focus (queue/badge if backgrounded) — overlaps with the smart-session-opening notification rules.
+
+---
+
 ## Sidebar design (open question)
 
 The sidebar session hierarchy needs rethinking. Currently grouped by mode (plan, review, annotate). Might make more sense grouped by project. Completed sessions should be visually distinct but present — not removed.
