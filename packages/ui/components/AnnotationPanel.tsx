@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Annotation, AnnotationType, Block, type CodeAnnotation, type EditorAnnotation } from '../types';
 import { isCurrentUser } from '../utils/identity';
+import { useConfigValue } from '../config';
 import { ImageThumbnail } from './ImageThumbnail';
 import { EditorAnnotationCard } from './EditorAnnotationCard';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -52,6 +53,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   onOtherFileAnnotationsClick,
 }) => {
   const isMobile = useIsMobile();
+  useConfigValue('displayName');
   const [copiedText, setCopiedText] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const sortedAnnotations = [...annotations].sort((a, b) => a.createdA - b.createdA);
