@@ -17,7 +17,7 @@
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { Type } from "@earendil-works/pi-ai";
 import type {
@@ -31,44 +31,31 @@ import {
 	markCompletedSteps,
 	parseChecklist,
 } from "./generated/checklist.js";
-import { hasMarkdownFiles, resolveUserPath } from "./generated/resolve-file.js";
-import { FILE_BROWSER_EXCLUDED } from "./generated/reference-common.js";
-import { htmlToMarkdown } from "./generated/html-to-markdown.js";
-import { urlToMarkdown, isConvertedSource } from "./generated/url-to-markdown.js";
-import { loadConfig, resolveUseJina } from "./generated/config.js";
+import { loadConfig } from "./generated/config.js";
 import { readImprovementHook } from "./generated/improvement-hooks.js";
 import { composeImproveContext } from "./generated/pfm-reminder.js";
 import {
-	getReviewApprovedPrompt,
-	getReviewDeniedSuffix,
 	getPlanDeniedPrompt,
 	getPlanApprovedPrompt,
 	getPlanApprovedWithNotesPrompt,
 	getPlanAutoApprovedPrompt,
 	getPlanToolName,
 	buildPlanFileRule,
-	getAnnotateFileFeedbackPrompt,
-	getAnnotateMessageFeedbackPrompt,
 } from "./generated/prompts.js";
-import { parseAnnotateArgs } from "./generated/annotate-args.js";
-import { parseReviewArgs } from "./generated/review-args.js";
-import { resolveAtReference } from "./generated/at-reference.js";
 import {
 	getStartupErrorMessage,
-	startCodeReviewBrowserSession,
+	startAnnotationSessionFromArgs,
+	startCodeReviewSessionFromArgs,
 	startLastMessageAnnotationSession,
-	startMarkdownAnnotationSession,
 	openPlanReviewBrowser,
 	registerPlannotatorEventListeners,
 } from "./plannotator-events.js";
 import {
 	getAssistantMessageText,
 	getLastAssistantMessageSnapshot,
-	hasSessionMovedPastEntry,
 } from "./assistant-message.js";
 import {
 	getPiSessionIdentity,
-	isCurrentPiSessionDifferentFrom,
 	notifyCurrentPiSession,
 	type PiSessionIdentity,
 	registerCurrentPiSession,
@@ -121,37 +108,6 @@ function reportBackgroundError(ctx: ExtensionContext, message: string, err: unkn
 	const detail = getStartupErrorMessage(err);
 	console.error(`${message}: ${detail}`);
 	safeNotify(ctx, `${message}: ${detail}`, "error", origin);
-}
-
-function excerptText(text: string, maxChars = 1000): string {
-	const trimmed = text.trim();
-	if (trimmed.length <= maxChars) return trimmed;
-	return `${trimmed.slice(0, maxChars).trimEnd()}...`;
-}
-
-function blockquote(text: string): string {
-	return text
-		.split("\n")
-		.map((line) => `> ${line}`)
-		.join("\n");
-}
-
-function anchorMessageFeedback(feedback: string, originalMessage: string): string {
-	return `This feedback applies to the earlier assistant response excerpted below:
-
-${blockquote(excerptText(originalMessage))}
-
-User feedback:
-${feedback}`;
-}
-
-function shouldAnchorLastMessageFeedback(ctx: ExtensionContext, entryId: string, origin: PiSessionIdentity): boolean {
-	if (isCurrentPiSessionDifferentFrom(origin)) return true;
-	try {
-		return hasSessionMovedPastEntry(ctx, entryId);
-	} catch {
-		return true;
-	}
 }
 
 function reportCurrentSessionSendFailure(errorMessage: string, err: unknown, origin: PiSessionIdentity): void {
@@ -403,13 +359,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			const origin = getPiSessionIdentity(ctx);
 
 			try {
-				const reviewArgs = parseReviewArgs(args ?? "");
-				const isPRReview = reviewArgs.prUrl !== undefined;
-				const session = await startCodeReviewBrowserSession(ctx, {
-					prUrl: reviewArgs.prUrl,
-					vcsType: reviewArgs.vcsType,
-					useLocal: reviewArgs.useLocal,
-				});
+				const session = await startCodeReviewSessionFromArgs(ctx, args ?? "");
 				ctx.ui.notify("Code review opened. You can keep chatting while it runs.", "info");
 				void session
 					.waitForDecision()
@@ -422,7 +372,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 							if (result.approved) {
 								sendUserMessageWithCurrentSessionFallback(
 									pi,
-									getReviewApprovedPrompt("pi", loadConfig()),
+									result.prompt ?? result.feedback ?? "",
 									{ deliverAs: "followUp" },
 									"Plannotator code review feedback could not be sent",
 									origin,
@@ -433,21 +383,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 								safeNotify(ctx, "Code review closed (no feedback).", "info", origin);
 								return;
 							}
-							if (isPRReview) {
-								// Platform PR actions (approve/comment) return approved:false with a
-								// status message — don't tell the agent to "address" a platform action.
-								sendUserMessageWithCurrentSessionFallback(
-									pi,
-									result.feedback,
-									{ deliverAs: "followUp" },
-									"Plannotator code review feedback could not be sent",
-									origin,
-								);
-								return;
-							}
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
-								`${result.feedback}${getReviewDeniedSuffix("pi", loadConfig())}`,
+								result.prompt ?? result.feedback,
 								{ deliverAs: "followUp" },
 								"Plannotator code review feedback could not be sent",
 								origin,
@@ -471,115 +409,20 @@ export default function plannotator(pi: ExtensionAPI): void {
 	pi.registerCommand("plannotator-annotate", {
 		description: "Open markdown file or folder in annotation UI",
 		handler: async (args, ctx) => {
-			// #570: split --gate / --json from the path. --json is silently
-			// accepted (Pi writes back via sendUserMessage, not stdout).
-			// `rawFilePath` keeps any leading `@` for the literal-@ fallback
-			// (scoped-package-style names).
-			const { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag } = parseAnnotateArgs(args ?? "");
-			if (!filePath) {
+			const rawAnnotateArgs = args ?? "";
+			const hasTarget = rawAnnotateArgs.replace(/--gate|--render-html|--json|--hook/g, "").trim().length > 0;
+			const gate = rawAnnotateArgs.includes("--gate") || rawAnnotateArgs.includes("--hook");
+			const renderHtmlFlag = rawAnnotateArgs.includes("--render-html");
+			if (!hasTarget) {
 				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--gate] [--json]", "error");
 				return;
-			}
-
-			let markdown: string;
-			let rawHtml: string | undefined;
-			let absolutePath: string;
-			let folderPath: string | undefined;
-			let mode: "annotate" | "annotate-folder" | undefined;
-			let sourceInfo: string | undefined;
-			let sourceConverted = false;
-			let isFolder = false;
-
-			// --- URL annotation ---
-			const isUrl = /^https?:\/\//i.test(filePath);
-
-			if (isUrl) {
-				const useJina = resolveUseJina(false, loadConfig());
-				ctx.ui.notify(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...`, "info");
-				try {
-					const result = await urlToMarkdown(filePath, {
-						useJina,
-						jinaApiKey: process.env.JINA_API_KEY,
-					});
-					markdown = result.markdown;
-					sourceConverted = isConvertedSource(result.source);
-				} catch (err) {
-					ctx.ui.notify(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`, "error");
-					return;
-				}
-				absolutePath = filePath;
-				sourceInfo = filePath;
-			} else {
-				// Pick the interpretation of the user input that actually exists:
-				// stripped form first (reference-mode primary), literal as fallback
-				// for scoped-package-style names. Falls back to the stripped form
-				// for the error message if neither exists.
-				const resolvedCandidate = resolveAtReference(rawFilePath, (c) => {
-					const abs = resolveUserPath(c, ctx.cwd);
-					return existsSync(abs);
-				});
-				if (resolvedCandidate === null) {
-					absolutePath = resolveUserPath(filePath, ctx.cwd);
-					ctx.ui.notify(`File not found: ${absolutePath}`, "error");
-					return;
-				}
-				absolutePath = resolveUserPath(resolvedCandidate, ctx.cwd);
-
-				try {
-					isFolder = statSync(absolutePath).isDirectory();
-				} catch {
-					ctx.ui.notify(`Cannot access: ${absolutePath}`, "error");
-					return;
-				}
-
-				if (isFolder) {
-					if (!hasMarkdownFiles(absolutePath, FILE_BROWSER_EXCLUDED, /\.(mdx?|html?)$/i)) {
-						ctx.ui.notify(`No markdown or HTML files found in ${absolutePath}`, "error");
-						return;
-					}
-					markdown = "";
-					folderPath = absolutePath;
-					mode = "annotate-folder";
-					ctx.ui.notify(`Opening annotation UI for folder ${filePath}...`, "info");
-				} else if (/\.html?$/i.test(absolutePath)) {
-					// HTML file annotation — convert to markdown via Turndown
-					const fileSize = statSync(absolutePath).size;
-					if (fileSize > 10 * 1024 * 1024) {
-						ctx.ui.notify(`File too large (${Math.round(fileSize / 1024 / 1024)}MB, max 10MB)`, "error");
-						return;
-					}
-					const html = readFileSync(absolutePath, "utf-8");
-					if (renderHtmlFlag) {
-						rawHtml = html;
-						markdown = "";
-					} else {
-						markdown = htmlToMarkdown(html);
-						sourceConverted = true;
-					}
-					sourceInfo = basename(absolutePath);
-					ctx.ui.notify(`Opening annotation UI for ${filePath}...`, "info");
-				} else {
-					markdown = readFileSync(absolutePath, "utf-8");
-					ctx.ui.notify(`Opening annotation UI for ${filePath}...`, "info");
-				}
 			}
 
 			currentPiSession.update(ctx);
 			const origin = getPiSessionIdentity(ctx);
 
 			try {
-				const session = await startMarkdownAnnotationSession(
-					ctx,
-					absolutePath,
-					markdown,
-					mode ?? "annotate",
-					folderPath,
-					sourceInfo,
-					sourceConverted,
-					gate,
-					rawHtml,
-					renderHtmlFlag,
-				);
+				const session = await startAnnotationSessionFromArgs(ctx, rawAnnotateArgs, { gate, renderHtml: renderHtmlFlag });
 				ctx.ui.notify("Annotation opened. You can keep chatting while it runs.", "info");
 				void session
 					.waitForDecision()
@@ -599,11 +442,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 							}
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
-								getAnnotateFileFeedbackPrompt("pi", loadConfig(), {
-									fileHeader: isFolder ? "Folder" : "File",
-									filePath: absolutePath,
-									feedback: result.feedback,
-								}),
+								result.prompt ?? result.feedback,
 								{ deliverAs: "followUp" },
 								"Plannotator annotation feedback could not be sent",
 								origin,
@@ -628,7 +467,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		description: "Annotate the last assistant message",
 		handler: async (args, ctx) => {
 			// #570: support --gate on /plannotator-last for Stop-hook review gate.
-			const { gate } = parseAnnotateArgs(args ?? "");
+			const gate = (args ?? "").includes("--gate") || (args ?? "").includes("--hook");
 
 			currentPiSession.update(ctx);
 			const origin = getPiSessionIdentity(ctx);
@@ -660,14 +499,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 								safeNotify(ctx, "Annotation closed (no feedback).", "info", origin);
 								return;
 							}
-							const feedback = shouldAnchorLastMessageFeedback(ctx, snapshot.entryId, origin)
-								? anchorMessageFeedback(result.feedback, snapshot.text)
-								: result.feedback;
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
-								getAnnotateMessageFeedbackPrompt("pi", loadConfig(), {
-									feedback,
-								}),
+								result.prompt ?? result.feedback,
 								{ deliverAs: "followUp" },
 								"Plannotator message annotation feedback could not be sent",
 								origin,

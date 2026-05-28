@@ -1,9 +1,10 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { DiffType } from "./generated/review-core.js";
-import type { VcsSelection } from "./generated/vcs-core.js";
 import type { PluginFeature, PluginSessionInfo } from "./generated/plugin-protocol.js";
+
+export type DiffType = "uncommitted" | "staged" | "unstaged" | "last-commit" | "jj-current" | "jj-last" | "jj-line" | "jj-all" | "jj-evolog" | "branch" | "merge-base" | "all" | `worktree:${string}` | "p4-default" | `p4-changelist:${string}`;
+export type VcsSelection = "auto" | "git" | "jj" | "p4";
 import {
 	ensurePlannotatorBinary,
 	findPlannotatorSourceRoot,
@@ -266,7 +267,7 @@ export async function openPlanReviewBrowser(
 export async function openCodeReview(
 	ctx: ExtensionContext,
 	options: { cwd?: string; defaultBranch?: string; diffType?: DiffType; prUrl?: string; vcsType?: VcsSelection; useLocal?: boolean } = {},
-): Promise<{ approved: boolean; feedback?: string; annotations?: unknown[]; agentSwitch?: string; exit?: boolean }> {
+): Promise<{ approved: boolean; feedback?: string; annotations?: unknown[]; agentSwitch?: string; exit?: boolean; prompt?: string }> {
 	const session = await startCodeReviewBrowserSession(ctx, options);
 	return session.waitForDecision();
 }
@@ -274,7 +275,7 @@ export async function openCodeReview(
 export async function startCodeReviewBrowserSession(
 	ctx: ExtensionContext,
 	options: { cwd?: string; defaultBranch?: string; diffType?: DiffType; prUrl?: string; vcsType?: VcsSelection; useLocal?: boolean } = {},
-): Promise<BrowserDecisionSession<{ approved: boolean; feedback?: string; annotations?: unknown[]; agentSwitch?: string; exit?: boolean }>> {
+): Promise<BrowserDecisionSession<{ approved: boolean; feedback?: string; annotations?: unknown[]; agentSwitch?: string; exit?: boolean; prompt?: string }>> {
 	if (!ctx.hasUI) {
 		throw new Error("Plannotator code review browser is unavailable in this session.");
 	}
@@ -296,6 +297,26 @@ export async function startCodeReviewBrowserSession(
 	}, (sessionInfo) => notifySessionReady(ctx, sessionInfo));
 }
 
+export async function startCodeReviewSessionFromArgs(
+	ctx: ExtensionContext,
+	rawArgs: string,
+): Promise<BrowserDecisionSession<{ approved: boolean; feedback?: string; annotations?: unknown[]; agentSwitch?: string; exit?: boolean; prompt?: string }>> {
+	if (!ctx.hasUI) {
+		throw new Error("Plannotator code review browser is unavailable in this session.");
+	}
+
+	const binaryPath = getBinaryPath(["code-review"]);
+	return await startBinarySession(async (onSession, signal) => {
+		const response = await runPluginReview(binaryPath, {
+			origin: "pi",
+			...sharingRequest(ctx),
+			args: rawArgs,
+		}, undefined, { onSession, signal });
+		if (!response.ok) throw new Error(response.error.message);
+		return response.result;
+	}, (sessionInfo) => notifySessionReady(ctx, sessionInfo));
+}
+
 export async function openMarkdownAnnotation(
 	ctx: ExtensionContext,
 	filePath: string,
@@ -305,7 +326,7 @@ export async function openMarkdownAnnotation(
 	sourceInfo?: string,
 	sourceConverted?: boolean,
 	gate?: boolean,
-): Promise<{ feedback: string; exit?: boolean; approved?: boolean }> {
+): Promise<{ feedback: string; exit?: boolean; approved?: boolean; prompt?: string }> {
 	const session = await startMarkdownAnnotationSession(
 		ctx,
 		filePath,
@@ -330,7 +351,7 @@ export async function startMarkdownAnnotationSession(
 	gate?: boolean,
 	rawHtml?: string,
 	renderHtml?: boolean,
-): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean }>> {
+): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; prompt?: string }>> {
 	if (!ctx.hasUI) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
 	}
@@ -356,11 +377,34 @@ export async function startMarkdownAnnotationSession(
 	}, (sessionInfo) => notifySessionReady(ctx, sessionInfo));
 }
 
+export async function startAnnotationSessionFromArgs(
+	ctx: ExtensionContext,
+	rawArgs: string,
+	options: { gate?: boolean; renderHtml?: boolean } = {},
+): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; filePath?: string; mode?: string; prompt?: string }>> {
+	if (!ctx.hasUI) {
+		throw new Error("Plannotator annotation browser is unavailable in this session.");
+	}
+
+	const binaryPath = getBinaryPath(["annotate"]);
+	return await startBinarySession(async (onSession, signal) => {
+		const response = await runPluginAnnotate(binaryPath, {
+			origin: "pi",
+			...sharingRequest(ctx),
+			args: rawArgs,
+			gate: options.gate,
+			renderHtml: options.renderHtml,
+		}, undefined, { onSession, signal });
+		if (!response.ok) throw new Error(response.error.message);
+		return response.result;
+	}, (sessionInfo) => notifySessionReady(ctx, sessionInfo));
+}
+
 export async function openLastMessageAnnotation(
 	ctx: ExtensionContext,
 	lastText: string,
 	gate?: boolean,
-): Promise<{ feedback: string; exit?: boolean; approved?: boolean }> {
+): Promise<{ feedback: string; exit?: boolean; approved?: boolean; prompt?: string }> {
 	return openMarkdownAnnotation(ctx, "last-message", lastText, "annotate-last", undefined, undefined, undefined, gate);
 }
 
@@ -368,7 +412,7 @@ export async function startLastMessageAnnotationSession(
 	ctx: ExtensionContext,
 	lastText: string,
 	gate?: boolean,
-): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean }>> {
+): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; prompt?: string }>> {
 	return startMarkdownAnnotationSession(
 		ctx,
 		"last-message",

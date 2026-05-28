@@ -2,15 +2,17 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { DiffType } from "./generated/review-core.js";
-import type { VcsSelection } from "./generated/vcs-core.js";
 import {
+	type DiffType,
+	type VcsSelection,
 	getLastAssistantMessageText,
 	getStartupErrorMessage,
 	openCodeReview,
 	openLastMessageAnnotation,
 	openMarkdownAnnotation,
+	startAnnotationSessionFromArgs,
 	startCodeReviewBrowserSession,
+	startCodeReviewSessionFromArgs,
 	startLastMessageAnnotationSession,
 	startMarkdownAnnotationSession,
 	startPlanReviewBrowserSession,
@@ -326,7 +328,9 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 
 export {
 	getLastAssistantMessageText,
+	startAnnotationSessionFromArgs,
 	startCodeReviewBrowserSession,
+	startCodeReviewSessionFromArgs,
 	startLastMessageAnnotationSession,
 	startMarkdownAnnotationSession,
 	getStartupErrorMessage,

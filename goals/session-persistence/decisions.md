@@ -38,16 +38,19 @@ Tracking decisions made during PR #770 review and triage (2026-05-23).
 ### Architecture
 
 - The `plannotator` binary is the only server. There is one server, one frontend, many entry points.
+- The daemon starts on install and is always running. Every CLI command assumes a daemon exists and talks to it. No lazy startup, no fallback to local file reads. If the daemon isn't there, it's a bug in the install — not something the CLI works around.
 - The binary either starts a daemon or connects to one already running. The daemon serves the frontend. That's it.
 - Claude Code calls the binary directly via hooks. OpenCode, Pi, Codex, Copilot, and Gemini CLI call it via thin extension/plugin wrappers that spawn the binary as a subprocess.
 - Extensions and plugins have no server logic of their own. They translate "my host app wants to review a plan" into "shell out to the `plannotator` binary."
-- The new frontend (`apps/frontend/`) is the only UI going forward. The old standalone HTML packages (`packages/editor/`, `packages/review-editor/`, `apps/review/`) are legacy and will be removed.
+- The daemon server is the single source of truth for feedback prompt generation. When a user submits feedback (annotate, review), the server composes the final agent-ready prompt and returns it as `result.prompt`. Extensions and the CLI pipe it through — they do not rebuild or reformat the prompt. The only exception is plan mode prompts, which are host-specific (each extension has its own planning workflow).
+- The new frontend (`apps/frontend/`) is the only UI going forward.
 
 ### Cross-Cutting
 
 - Every annotate session lives forever once created — single file, folder, last message, URL. No one-shot sessions. The tab stays open and interactive after feedback is sent. There are no exceptions.
 - Folder annotate sessions are reusable. If the user annotates the same folder twice, the daemon should find the existing session and reactivate it — not create a new one. The match key is the folder path. There's no content to update (it's a file browser), but the session is reused as-is.
 - Annotate-last is not reusable — "last message" has no stable identity across invocations. Each annotate-last creates a new session. This is fine; the command is rarely run twice in a row.
+- Annotate-last flow: caller captures the last assistant message → pipes it to the binary as `markdown` → the daemon holds the original message for the session lifetime → user annotates in the browser → server composes the final prompt including an excerpt of the original message → prompt returns through the CLI → back to the calling agent. The server always anchors annotate-last feedback to the original message because the conversation may have moved on by the time the user submits.
 - Legacy tab mode is the only case where the tab closes after feedback — that's the full-screen overlay with countdown, and it's the expected legacy behavior.
 - Sessions do not time out. A session, once created, lives until the daemon restarts. We do not kill sessions on a countdown. If a user submits feedback and the agent never comes back, that's for the user to see and decide — not for us to silently clean up.
 - We should collect the right data (timestamps, feedback-sent-at, last-agent-contact) so we can eventually show the user: "you submitted feedback but it never came back." But that's a future UI concern, not a reason to expire sessions.

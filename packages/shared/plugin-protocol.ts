@@ -1,7 +1,7 @@
 import type { Origin } from "./agents";
 
 export const PLANNOTATOR_PLUGIN_PROTOCOL = "plannotator-plugin";
-export const PLANNOTATOR_PLUGIN_PROTOCOL_VERSION = 1;
+export const PLANNOTATOR_PLUGIN_PROTOCOL_VERSION = 2;
 export const PLANNOTATOR_PLUGIN_MIN_CLIENT_VERSION = 1;
 
 export const PLANNOTATOR_PLUGIN_FEATURES = [
@@ -101,6 +101,7 @@ export interface PluginPlanResult {
   savedPath?: string;
   agentSwitch?: string;
   permissionMode?: string;
+  prompt?: string;
 }
 
 export interface PluginReviewResult {
@@ -109,6 +110,7 @@ export interface PluginReviewResult {
   annotations?: unknown[];
   agentSwitch?: string;
   exit?: boolean;
+  prompt?: string;
 }
 
 export interface PluginAnnotateResult {
@@ -118,6 +120,7 @@ export interface PluginAnnotateResult {
   approved?: boolean;
   filePath?: string;
   mode?: "annotate" | "annotate-folder" | "annotate-last";
+  prompt?: string;
 }
 
 export interface PluginGoalSetupResult {

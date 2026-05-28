@@ -47,21 +47,13 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
-import { loadConfig, resolveUseJina } from "@plannotator/shared/config";
-import { parseReviewArgs } from "@plannotator/shared/review-args";
 import {
   normalizeGoalSetupBundle,
   type GoalSetupStage,
 } from "@plannotator/shared/goal-setup";
 import { statSync, existsSync, rmSync } from "fs";
 import { tmpdir } from "os";
-import {
-  getReviewApprovedPrompt,
-  getReviewDeniedSuffix,
-  getPlanDeniedPrompt,
-  getPlanToolName,
-  buildPlanFileRule,
-} from "@plannotator/shared/prompts";
+
 import { openBrowser } from "@plannotator/server/browser";
 import { cleanupDaemonState, discoverDaemon, waitForDaemonShutdown } from "@plannotator/server/daemon/client";
 import { startDaemonRuntime } from "@plannotator/server/daemon/runtime";
@@ -69,9 +61,6 @@ import { createDaemonSessionFactory } from "@plannotator/server/daemon/session-f
 import { getDaemonStartCommand } from "@plannotator/server/daemon/start-command";
 import { createDaemonBrowserAuthUrl } from "@plannotator/server/daemon/state";
 import { formatRemoteShareNotice } from "@plannotator/server/share-url";
-import { hostnameOrFallback } from "@plannotator/shared/project";
-import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
-import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { AGENT_CONFIG, type Origin } from "@plannotator/shared/agents";
 import type { DaemonSessionSummary } from "@plannotator/shared/daemon-protocol";
 import {
@@ -182,6 +171,7 @@ const APPROVED_PLAINTEXT_MARKER = "The user approved.";
 
 function emitAnnotateOutcome(result: {
   feedback: string;
+  prompt?: string;
   exit?: boolean;
   approved?: boolean;
 }): void {
@@ -202,12 +192,13 @@ function emitAnnotateOutcome(result: {
     }
     return;
   }
+  const output = result.prompt ?? result.feedback;
   if (result.exit) return;
   if (result.approved) {
     console.log(APPROVED_PLAINTEXT_MARKER);
     return;
   }
-  if (result.feedback) console.log(result.feedback);
+  if (output) console.log(output);
 }
 
 if (isVersionInvocation(args)) {
@@ -452,10 +443,11 @@ async function cleanupDaemonStateForDaemonCommand(state: unknown): Promise<void>
   }
 }
 
-async function cleanupDaemonStateForSessionCommand(state: unknown, options: { pluginError?: boolean }): Promise<void> {
+async function cleanupDaemonStateForSessionCommand(state: unknown, options: { pluginError?: boolean; bestEffort?: boolean }): Promise<void> {
   try {
     await cleanupDaemonState(state);
   } catch (err) {
+    if (options.bestEffort) throw err;
     const fail = options.pluginError ? emitPluginError : emitCommandError;
     fail("daemon-cleanup-failed", errorMessage(err));
   }
@@ -534,8 +526,10 @@ function resolvePluginCwd(request: Partial<PluginBaseRequest>): string {
   return cwd;
 }
 
-async function ensureDaemonClient(options: { pluginError?: boolean } = {}) {
-  const fail = options.pluginError ? emitPluginError : emitCommandError;
+async function ensureDaemonClient(options: { pluginError?: boolean; bestEffort?: boolean } = {}) {
+  const fail = options.bestEffort
+    ? (code: string, message: string) => { throw new Error(`${code}: ${message}`); }
+    : options.pluginError ? emitPluginError : emitCommandError;
   const existing = await discoverDaemon();
   if (existing.ok) return existing.client;
   if (existing.state && (existing.code === "incompatible" || existing.code === "unhealthy")) {
@@ -709,13 +703,12 @@ async function runPluginPlanCommand(): Promise<void> {
 async function runPluginAnnotateCommand(defaultMode: "annotate" | "annotate-last" = "annotate"): Promise<void> {
   const request = await readPluginRequest<PluginAnnotateRequest>();
   const origin = getPluginOrigin(request);
-  const useJina = resolveUseJina(request.noJina === true, loadConfig());
   await runDaemonBackedPluginRequest({
     ...request,
     action: defaultMode,
     origin,
     cwd: resolvePluginCwd(request),
-    useJina,
+    noJina: request.noJina,
     jinaApiKey: process.env.JINA_API_KEY,
   });
 }
@@ -824,7 +817,6 @@ if (args[0] === "sessions") {
   // CODE REVIEW MODE
   // ============================================
 
-  const reviewArgs = parseReviewArgs(args.slice(1));
   const outcome = await runDaemonSessionRequest({
     action: "review",
     origin: detectedOrigin,
@@ -833,17 +825,12 @@ if (args[0] === "sessions") {
     sharingEnabled,
     shareBaseUrl,
   });
-  const result = outcome.result as { approved?: boolean; feedback?: string; exit?: boolean };
+  const result = outcome.result as { approved?: boolean; feedback?: string; prompt?: string; exit?: boolean };
 
   if (result.exit) {
     console.log("Review session closed without feedback.");
-  } else if (result.approved) {
-    console.log(getReviewApprovedPrompt(detectedOrigin));
   } else {
-    console.log(result.feedback || "");
-    if (!reviewArgs.prUrl) {
-      console.log(getReviewDeniedSuffix(detectedOrigin));
-    }
+    console.log(result.prompt ?? result.feedback ?? "");
   }
   process.exit(0);
 
@@ -864,7 +851,6 @@ if (args[0] === "sessions") {
     cwd: getInvocationCwd(),
     args: rawFilePath,
     noJina: cliNoJina,
-    useJina: resolveUseJina(cliNoJina, loadConfig()),
     jinaApiKey: process.env.JINA_API_KEY,
     gate: gateFlag,
     renderHtml: renderHtmlFlag,
@@ -872,7 +858,7 @@ if (args[0] === "sessions") {
     shareBaseUrl,
     pasteApiUrl,
   });
-  emitAnnotateOutcome(outcome.result as { feedback: string; exit?: boolean; approved?: boolean });
+  emitAnnotateOutcome(outcome.result as { feedback: string; prompt?: string; exit?: boolean; approved?: boolean });
   process.exit(0);
 
 } else if (args[0] === "annotate-last" || args[0] === "last") {
@@ -973,7 +959,7 @@ if (args[0] === "sessions") {
     pasteApiUrl,
   });
 
-  emitAnnotateOutcome(outcome.result as { feedback: string; exit?: boolean; approved?: boolean });
+  emitAnnotateOutcome(outcome.result as { feedback: string; prompt?: string; exit?: boolean; approved?: boolean });
   process.exit(0);
 
 } else if (args[0] === "setup-goal") {
@@ -1066,7 +1052,7 @@ if (args[0] === "sessions") {
     shareBaseUrl,
     pasteApiUrl,
   });
-  const result = outcome.result as { approved?: boolean; feedback?: string };
+  const result = outcome.result as { approved?: boolean; feedback?: string; prompt?: string };
 
   // Output Copilot CLI permission decision format
   if (result.approved) {
@@ -1074,14 +1060,9 @@ if (args[0] === "sessions") {
       permissionDecision: "allow",
     }));
   } else {
-    const feedback = getPlanDeniedPrompt("copilot-cli", undefined, {
-      toolName: getPlanToolName("copilot-cli"),
-      planFileRule: "",
-      feedback: result.feedback || "Plan changes requested",
-    });
     console.log(JSON.stringify({
       permissionDecision: "deny",
-      permissionDecisionReason: feedback,
+      permissionDecisionReason: result.prompt ?? result.feedback ?? "Plan changes requested",
     }));
   }
 
@@ -1132,7 +1113,7 @@ if (args[0] === "sessions") {
     pasteApiUrl,
   });
 
-  emitAnnotateOutcome(outcome.result as { feedback: string; exit?: boolean; approved?: boolean });
+  emitAnnotateOutcome(outcome.result as { feedback: string; prompt?: string; exit?: boolean; approved?: boolean });
   process.exit(0);
 
 } else if (args[0] === "improve-context") {
@@ -1141,21 +1122,22 @@ if (args[0] === "sessions") {
   // ============================================
   //
   // Called by PreToolUse hook on EnterPlanMode.
-  // Composes any enabled context sources (compound improvement hook,
+  // Daemon composes any enabled context sources (compound improvement hook,
   // PFM reminder) into a single additionalContext payload.
   // Nothing enabled = exit 0 silently (passthrough).
 
   await Bun.stdin.text();
 
-  const hook = readImprovementHook("enterplanmode-improve");
-  const pfmEnabled = loadConfig().pfmReminder === true;
+  let context: string | null = null;
+  try {
+    const client = await ensureDaemonClient({ bestEffort: true });
+    const data = await client.getJson("/daemon/improve-context") as { ok: boolean; context: string | null };
+    context = data.context;
+  } catch {
+    // Daemon unavailable — silently pass through
+  }
 
-  const context = composeImproveContext({
-    pfmEnabled,
-    improvementHookContent: hook?.content ?? null,
-  });
-
-  if (context === null) process.exit(0);
+  if (!context) process.exit(0);
 
   console.log(JSON.stringify({
     hookSpecificOutput: {
@@ -1214,7 +1196,7 @@ if (args[0] === "sessions") {
       shareBaseUrl,
       pasteApiUrl,
     });
-    const result = outcome.result as { approved?: boolean; feedback?: string };
+    const result = outcome.result as { approved?: boolean; feedback?: string; prompt?: string };
 
     if (result.approved) {
       console.log("{}");
@@ -1222,11 +1204,7 @@ if (args[0] === "sessions") {
       console.log(
         JSON.stringify({
           decision: "block",
-          reason: getPlanDeniedPrompt("codex", undefined, {
-            toolName: getPlanToolName("codex"),
-            planFileRule: "",
-            feedback: result.feedback || "Plan changes requested",
-          }),
+          reason: result.prompt ?? result.feedback ?? "Plan changes requested",
         })
       );
     }
@@ -1266,6 +1244,7 @@ if (args[0] === "sessions") {
     origin: isGemini ? "gemini-cli" : detectedOrigin,
     cwd: getInvocationCwd(),
     plan: planContent,
+    planFilePath: planFilename || undefined,
     permissionMode,
     sharingEnabled,
     shareBaseUrl,
@@ -1274,6 +1253,7 @@ if (args[0] === "sessions") {
   const result = outcome.result as {
     approved?: boolean;
     feedback?: string;
+    prompt?: string;
     permissionMode?: string;
   };
 
@@ -1285,11 +1265,7 @@ if (args[0] === "sessions") {
       console.log(
         JSON.stringify({
           decision: "deny",
-          reason: getPlanDeniedPrompt("gemini-cli", undefined, {
-            toolName: getPlanToolName("gemini-cli"),
-            planFileRule: buildPlanFileRule(getPlanToolName("gemini-cli"), planFilename),
-            feedback: result.feedback || "Plan changes requested",
-          }),
+          reason: result.prompt ?? result.feedback ?? "Plan changes requested",
         })
       );
     }
@@ -1323,11 +1299,7 @@ if (args[0] === "sessions") {
             hookEventName: "PermissionRequest",
             decision: {
               behavior: "deny",
-              message: getPlanDeniedPrompt(detectedOrigin, undefined, {
-                toolName: getPlanToolName(detectedOrigin),
-                planFileRule: "",
-                feedback: result.feedback || "Plan changes requested",
-              }),
+              message: result.prompt ?? result.feedback ?? "Plan changes requested",
             },
           },
         })
