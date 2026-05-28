@@ -59,7 +59,7 @@ Tracking decisions made during PR #770 review and triage (2026-05-23).
 - Plan/annotate actions (Approve, Deny, Send Feedback) must be disabled while awaiting resubmission. The agent already has the feedback — submitting again against stale content is wrong. Code review already handles this (buttons hidden when idle).
 - Late WebSocket subscribers (tab refresh during awaiting) should receive the current state. The snapshot provider for `session-revision` must return the latest content, not null.
 - HTML and markdown annotation should go through the same functional pipeline. The `--render-html` path diverges from markdown in a way that `updateContent` can't reach — `updateContent` must also update `rawHtml` for HTML sessions.
-- PR review sessions that get reactivated need updated PR metadata (head SHA, etc.). The current implementation serves the correct diff but posts platform actions against the stale commit. Needs a bigger fix to make PR metadata updatable inside the session closure.
+- PR review sessions that get reactivated refresh their PR metadata (head SHA, ref, diff baseline, stack info) inside the session closure, so platform actions (approve/comment) target the **current** head commit — not the SHA captured at session creation. Fixed in #816. Note the submit path resolves the head SHA from `prSwitchCache` (keyed by PR url), so that cache entry is refreshed on reactivation too, not just the `prMetadata` variable.
 - Annotate history slug is computed once from the initial heading and doesn't update if the heading changes. Acceptable — versions stay intact, just filed under the old name on disk.
 - The decision listener must stay alive after every user action — approve, deny, exit, send feedback. If the listener shuts down after approve/exit, the session looks alive but can't respond to future resubmissions. The agent hangs forever.
 - Session collisions across worktrees of the same repo are not a real concern. This is a local app — one daemon per machine.
@@ -84,7 +84,7 @@ agent → plannotator review again (CLI opens) → reactivates the idle session
 
 Key behaviors:
 - After feedback: session transitions to `idle` via `store.idle()`. The HTTP handler stays alive, resources stay alive. The user can browse the diff and make annotations, but Send Feedback / Approve buttons are hidden (no agent to receive them).
-- On reactivation: agent triggers `plannotator review` from the same directory/branch. The daemon finds the idle session by matchKey, pushes the new diff via `updateContent`, and calls `store.reactivate()`. The frontend receives a `session-revision` WebSocket event, updates the diff, and re-shows the submit buttons.
+- On reactivation: the agent triggers `plannotator review` again — either from the same directory/branch (local review, matchKey `review:project:branch`) or for the **same PR/MR URL** (matchKey `review:${prUrl}`, e.g. after pushing new commits to the PR). The daemon finds the idle session by matchKey, pushes the new diff via `updateContent`, and calls `store.reactivate()`. The frontend receives a `session-revision` WebSocket event, updates the diff, and re-shows the submit buttons. **In PR mode, `updateContent` also refreshes the PR metadata (head SHA, ref, diff baseline) — and the `prSwitchCache` entry the submit path reads — so a subsequent approve/comment targets the new head commit (#816), instead of the SHA captured when the review first opened.**
 - Infinite cycle: this repeats as many times as needed. No counter, no limit.
 - Cleanup: idle sessions have no expiry. They live until daemon restart.
 
@@ -148,13 +148,13 @@ Non-terminal sessions (`awaiting-resubmission`, `idle`, `active` after first dec
 | `waitForResult` missing `awaiting-resubmission` short-circuit | P2 | Fixed |
 | `session-revision` snapshot provider returns null | P2 | Fixed |
 | `--render-html` resubmission shows stale HTML | P2 | Fixed — `handleUpdateContent` now accepts and updates `rawHtml` |
-| PR reviews keep stale metadata on reuse | P1 | Deferred — needs PR metadata updatable in session closure |
+| PR reviews keep stale metadata on reuse | P1 | Fixed (#816) — `handleUpdateContent` refreshes `prMetadata`/`prRef`/`prSwitchCache` (+ diff baseline, stack info) on reactivation, so approve/comment targets the current head SHA |
 | Gate flag not updated on resubmission | P2 | Deferred — if session was created ungated and agent resubmits with `--gate`, Approve button won't appear (user still sees Send Annotations + Close). Reverse also true: gated session stays gated even if agent resubmits without `--gate`. Fix: `updateContent` should accept and update the `gate` flag. |
 | Provenance data for stale sessions | P3 | Deferred — collect timestamps (feedback-sent-at, last-agent-contact) so we can show "you submitted feedback but it never came back." Future UI concern. |
 | `onCancel` never wired on awaiting banner | nit | Deferred |
 | Session collisions across same-repo worktrees | nit | Accepted — local app, one daemon per machine |
 | Annotate slug doesn't update on heading change | nit | Accepted — cosmetic, versions work correctly |
 | VS Code editor annotations not cleared on revision | P2 | Fixed — `editorAnnotations.clearAll()` added to `handleUpdateContent` in plan and review servers |
-| PR diff scope/baseline not reset on reuse | P2 | Deferred — part of the broader PR metadata staleness issue. `originalPRPatch`, `currentPRDiffScope` not updated in `handleUpdateContent`. |
+| PR diff scope/baseline not reset on reuse | P2 | Fixed (#816) — `handleUpdateContent` now resets `originalPRPatch`/`originalPRGitRef`/`currentPRDiffScope` on reactivation |
 | Remote share link stale on session reuse | P2 | Fixed — all three reuse paths regenerate `remoteShare` before returning the record |
 | `sessionRefs` lazy cleanup | nit | Accepted — negligible memory |
