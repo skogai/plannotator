@@ -290,6 +290,11 @@ else
 fi
 
 # Remove old binary first (handles Windows .exe and locked file issues)
+# Stop any running daemon before replacing the binary. On upgrades the old
+# daemon would keep serving stale code from memory; on Windows the running
+# exe would also be file-locked. Silent if no daemon is running.
+"$INSTALL_DIR/plannotator" daemon stop >/dev/null 2>&1 || true
+
 rm -f "$INSTALL_DIR/plannotator" "$INSTALL_DIR/plannotator.exe" 2>/dev/null || true
 
 mv "$tmp_file" "$INSTALL_DIR/plannotator"
@@ -298,8 +303,7 @@ chmod +x "$INSTALL_DIR/plannotator"
 echo ""
 echo "plannotator ${latest_tag} installed to ${INSTALL_DIR}/plannotator"
 
-# Start the daemon so hooks work immediately (e.g. improve-context fires
-# before any session exists and needs a running daemon to talk to).
+# Start a fresh daemon so hooks work immediately.
 "$INSTALL_DIR/plannotator" daemon start >/dev/null 2>&1 &
 
 if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then

@@ -224,13 +224,18 @@ if ($verifyAttestationResolved) {
     Write-Host "https://plannotator.ai/docs/getting-started/installation/#verifying-your-install"
 }
 
+# Stop any running daemon before replacing the binary. On Windows the running
+# exe is file-locked; on upgrades the old daemon would serve stale code.
+if (Test-Path "$installDir\plannotator.exe") {
+    Start-Process -FilePath "$installDir\plannotator.exe" -ArgumentList "daemon","stop" -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue
+}
+
 Move-Item -Force $tmpFile "$installDir\plannotator.exe"
 
 Write-Host ""
 Write-Host "plannotator $latestTag installed to $installDir\plannotator.exe"
 
-# Start the daemon so hooks work immediately (e.g. improve-context fires
-# before any session exists and needs a running daemon to talk to).
+# Start a fresh daemon so hooks work immediately.
 Start-Process -FilePath "$installDir\plannotator.exe" -ArgumentList "daemon","start" -WindowStyle Hidden -ErrorAction SilentlyContinue
 
 # Add to PATH if not already there
