@@ -203,7 +203,7 @@ const GitTab: React.FC = () => {
           <button
             key={opt.value}
             type="button"
-            onClick={() => configStore.set('defaultDiffType', opt.value)}
+            onClick={() => configStore.getState().set('defaultDiffType', opt.value)}
             className={`w-full flex items-start gap-3 p-3 rounded-lg border transition-colors text-left ${
               defaultDiffType === opt.value
                 ? 'border-primary bg-primary/5'
@@ -255,7 +255,7 @@ const ReviewDisplayTab: React.FC = () => {
         </div>
         <select
           value={diffFontFamily}
-          onChange={(e) => configStore.set('diffFontFamily', e.target.value)}
+          onChange={(e) => configStore.getState().set('diffFontFamily', e.target.value)}
           className="w-full px-3 py-1.5 text-sm rounded-md bg-muted/50 border border-border text-foreground"
           style={diffFontFamily ? { fontFamily: `'${diffFontFamily}', monospace` } : undefined}
         >
@@ -293,12 +293,12 @@ const ReviewDisplayTab: React.FC = () => {
             max={24}
             step={1}
             value={diffFontSize ? parseInt(diffFontSize) : 13}
-            onChange={(e) => configStore.set('diffFontSize', `${e.target.value}px`)}
+            onChange={(e) => configStore.getState().set('diffFontSize', `${e.target.value}px`)}
             className="flex-1 h-1.5 accent-primary cursor-pointer"
           />
           {diffFontSize && (
             <button
-              onClick={() => configStore.set('diffFontSize', '')}
+              onClick={() => configStore.getState().set('diffFontSize', '')}
               className="text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
               Reset
@@ -315,7 +315,7 @@ const ReviewDisplayTab: React.FC = () => {
           <div className="text-sm font-medium">Diff Style</div>
           <div className="text-xs text-muted-foreground">Side-by-side or inline diff view</div>
         </div>
-        <SegmentedControl options={DIFF_STYLE_OPTIONS} value={diffStyle} onChange={(v) => configStore.set('diffStyle', v)} />
+        <SegmentedControl options={DIFF_STYLE_OPTIONS} value={diffStyle} onChange={(v) => configStore.getState().set('diffStyle', v)} />
       </div>
 
       <div className="border-t border-border" />
@@ -326,7 +326,7 @@ const ReviewDisplayTab: React.FC = () => {
           <div className="text-sm font-medium">Line Overflow</div>
           <div className="text-xs text-muted-foreground">How to handle long lines in diffs</div>
         </div>
-        <SegmentedControl options={OVERFLOW_OPTIONS} value={diffOverflow} onChange={(v) => configStore.set('diffOverflow', v)} />
+        <SegmentedControl options={OVERFLOW_OPTIONS} value={diffOverflow} onChange={(v) => configStore.getState().set('diffOverflow', v)} />
       </div>
 
       <div className="border-t border-border" />
@@ -337,7 +337,7 @@ const ReviewDisplayTab: React.FC = () => {
           <div className="text-sm font-medium">Change Indicators</div>
           <div className="text-xs text-muted-foreground">Style of +/- markers in the gutter</div>
         </div>
-        <SegmentedControl options={INDICATOR_OPTIONS} value={diffIndicators} onChange={(v) => configStore.set('diffIndicators', v)} />
+        <SegmentedControl options={INDICATOR_OPTIONS} value={diffIndicators} onChange={(v) => configStore.getState().set('diffIndicators', v)} />
       </div>
 
       <div className="border-t border-border" />
@@ -348,7 +348,7 @@ const ReviewDisplayTab: React.FC = () => {
           <div className="text-sm font-medium">Inline Diff Granularity</div>
           <div className="text-xs text-muted-foreground">Highlight granularity for inline changes</div>
         </div>
-        <SegmentedControl options={LINE_DIFF_OPTIONS} value={diffLineDiffType} onChange={(v) => configStore.set('diffLineDiffType', v)} />
+        <SegmentedControl options={LINE_DIFF_OPTIONS} value={diffLineDiffType} onChange={(v) => configStore.getState().set('diffLineDiffType', v)} />
       </div>
 
       <div className="border-t border-border" />
@@ -356,7 +356,7 @@ const ReviewDisplayTab: React.FC = () => {
       {/* Show Line Numbers */}
       <ToggleSwitch
         checked={diffShowLineNumbers}
-        onChange={(v) => configStore.set('diffShowLineNumbers', v)}
+        onChange={(v) => configStore.getState().set('diffShowLineNumbers', v)}
         label="Show Line Numbers"
       />
 
@@ -365,7 +365,7 @@ const ReviewDisplayTab: React.FC = () => {
       {/* Show Diff Background */}
       <ToggleSwitch
         checked={diffShowBackground}
-        onChange={(v) => configStore.set('diffShowBackground', v)}
+        onChange={(v) => configStore.getState().set('diffShowBackground', v)}
         label="Show Diff Background"
         description="Colored backgrounds on added/deleted lines"
       />
@@ -377,7 +377,7 @@ const ReviewDisplayTab: React.FC = () => {
             <div className="text-sm font-medium">Line Background Intensity</div>
             <div className="text-xs text-muted-foreground">How prominent the colored line backgrounds appear</div>
           </div>
-          <SegmentedControl options={LINE_BG_INTENSITY_OPTIONS} value={diffLineBgIntensity} onChange={(v) => configStore.set('diffLineBgIntensity', v)} />
+          <SegmentedControl options={LINE_BG_INTENSITY_OPTIONS} value={diffLineBgIntensity} onChange={(v) => configStore.getState().set('diffLineBgIntensity', v)} />
         </div>
       )}
 
@@ -386,7 +386,7 @@ const ReviewDisplayTab: React.FC = () => {
       {/* Hide Whitespace */}
       <ToggleSwitch
         checked={diffHideWhitespace}
-        onChange={(v) => configStore.set('diffHideWhitespace', v)}
+        onChange={(v) => configStore.getState().set('diffHideWhitespace', v)}
         label="Hide Whitespace"
         description="Ignore whitespace-only changes in diffs"
       />
@@ -442,7 +442,7 @@ const CommentsTab: React.FC = () => {
 
   const save = (next: CCLabelConfig[]) => {
     setLabels(next);
-    configStore.set('conventionalLabels', JSON.stringify(next));
+    configStore.getState().set('conventionalLabels', JSON.stringify(next));
   };
 
   const updateLabel = (index: number, updates: Partial<CCLabelConfig>) => {
@@ -465,14 +465,14 @@ const CommentsTab: React.FC = () => {
 
   const resetToDefaults = () => {
     setLabels(DEFAULT_CC_LABELS);
-    configStore.set('conventionalLabels', null);
+    configStore.getState().set('conventionalLabels', null);
   };
 
   return (
     <>
       <ToggleSwitch
         checked={conventionalComments}
-        onChange={(v) => configStore.set('conventionalComments', v)}
+        onChange={(v) => configStore.getState().set('conventionalComments', v)}
         label="Conventional Comments"
         description="Add structured labels to review comments"
       />
@@ -811,7 +811,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     saveDefaultNotesApp(app);
   };
 
-  // Server write-back is handled automatically by configStore.set() (debounced POST /api/config)
+  // Server write-back is handled automatically by configStore.getState().set() (debounced POST /api/config)
 
   const handleRegenerateIdentity = () => {
     const oldIdentity = identity;

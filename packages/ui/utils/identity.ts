@@ -17,7 +17,7 @@ import { generateIdentity } from './generateIdentity';
  * Get current identity from ConfigStore.
  */
 export function getIdentity(): string {
-  return configStore.get('displayName');
+  return configStore.getState().get('displayName');
 }
 
 /**
@@ -27,7 +27,7 @@ export function getIdentity(): string {
 export function setCustomIdentity(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) return getIdentity(); // reject empty
-  configStore.set('displayName', trimmed);
+  configStore.getState().set('displayName', trimmed);
   return trimmed;
 }
 
@@ -37,7 +37,7 @@ export function setCustomIdentity(name: string): string {
  */
 export function regenerateIdentity(): string {
   const identity = generateIdentity();
-  configStore.set('displayName', identity);
+  configStore.getState().set('displayName', identity);
   return identity;
 }
 
@@ -46,5 +46,5 @@ export function regenerateIdentity(): string {
  */
 export function isCurrentUser(author: string | undefined): boolean {
   if (!author) return false;
-  return author === configStore.get('displayName');
+  return author === configStore.getState().get('displayName');
 }

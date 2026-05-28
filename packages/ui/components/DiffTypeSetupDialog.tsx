@@ -41,12 +41,12 @@ export const DiffTypeSetupDialog: React.FC<DiffTypeSetupDialogProps> = ({
   onComplete,
 }) => {
   const [selected, setSelected] = useState<DefaultDiffType>(
-    () => configStore.get('defaultDiffType')
+    () => configStore.getState().get('defaultDiffType')
   );
   const [imageHovered, setImageHovered] = useState(false);
 
   const handleDone = () => {
-    configStore.set('defaultDiffType', selected);
+    configStore.getState().set('defaultDiffType', selected);
     markDiffTypeSetupDone();
     onComplete(selected);
   };

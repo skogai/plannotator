@@ -123,41 +123,41 @@ export const DiffOptionsPopover: React.FC = () => {
                 <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70 mb-1">Layout</div>
                 <div className="flex items-center gap-2">
                   <div className="flex-1">
-                    <CompactSegmented options={DIFF_STYLE_OPTIONS} value={diffStyle} onChange={(v) => configStore.set('diffStyle', v)} />
+                    <CompactSegmented options={DIFF_STYLE_OPTIONS} value={diffStyle} onChange={(v) => configStore.getState().set('diffStyle', v)} />
                   </div>
                   <div className="w-px h-5 bg-border/50 flex-shrink-0" />
                   <div className="flex-1">
-                    <CompactSegmented options={OVERFLOW_OPTIONS} value={diffOverflow} onChange={(v) => configStore.set('diffOverflow', v)} />
+                    <CompactSegmented options={OVERFLOW_OPTIONS} value={diffOverflow} onChange={(v) => configStore.getState().set('diffOverflow', v)} />
                   </div>
                 </div>
               </div>
               <div>
                 <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70 mb-1">Indicators</div>
-                <CompactSegmented options={INDICATOR_OPTIONS} value={diffIndicators} onChange={(v) => configStore.set('diffIndicators', v)} />
+                <CompactSegmented options={INDICATOR_OPTIONS} value={diffIndicators} onChange={(v) => configStore.getState().set('diffIndicators', v)} />
               </div>
               <div>
                 <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70 mb-1">Inline diff</div>
-                <CompactSegmented options={LINE_DIFF_OPTIONS} value={diffLineDiffType} onChange={(v) => configStore.set('diffLineDiffType', v)} />
+                <CompactSegmented options={LINE_DIFF_OPTIONS} value={diffLineDiffType} onChange={(v) => configStore.getState().set('diffLineDiffType', v)} />
               </div>
             </div>
 
             <div className="border-t border-border/50" />
 
             <div>
-              <CompactToggle checked={diffShowLineNumbers} onChange={(v) => configStore.set('diffShowLineNumbers', v)} label="Line numbers" />
-              <CompactToggle checked={diffShowBackground} onChange={(v) => configStore.set('diffShowBackground', v)} label="Diff background" />
+              <CompactToggle checked={diffShowLineNumbers} onChange={(v) => configStore.getState().set('diffShowLineNumbers', v)} label="Line numbers" />
+              <CompactToggle checked={diffShowBackground} onChange={(v) => configStore.getState().set('diffShowBackground', v)} label="Diff background" />
               {diffShowBackground && (
                 <div className="pl-3 pr-0.5 pb-1 -mt-0.5">
-                  <CompactSegmented options={LINE_BG_INTENSITY_OPTIONS} value={diffLineBgIntensity} onChange={(v) => configStore.set('diffLineBgIntensity', v)} />
+                  <CompactSegmented options={LINE_BG_INTENSITY_OPTIONS} value={diffLineBgIntensity} onChange={(v) => configStore.getState().set('diffLineBgIntensity', v)} />
                 </div>
               )}
-              <CompactToggle checked={diffHideWhitespace} onChange={(v) => configStore.set('diffHideWhitespace', v)} label="Hide whitespace" />
+              <CompactToggle checked={diffHideWhitespace} onChange={(v) => configStore.getState().set('diffHideWhitespace', v)} label="Hide whitespace" />
               <CompactStepper
                 label="Tab size"
                 value={diffTabSize}
                 min={1}
                 max={8}
-                onChange={(v) => configStore.set('diffTabSize', v)}
+                onChange={(v) => configStore.getState().set('diffTabSize', v)}
               />
             </div>
           </div>

@@ -780,7 +780,7 @@ const App: React.FC = () => {
       })
       .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string } }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
-        configStore.init(data.serverConfig);
+        configStore.getState().init(data.serverConfig);
         setAISessionEnabled(data.mode !== 'archive' && data.mode !== 'goal-setup');
         // gitUser drives the "Use git name" button in Settings; stays undefined (button hidden) when unavailable
         setGitUser(data.serverConfig?.gitUser);
@@ -1327,7 +1327,7 @@ const App: React.FC = () => {
       images: input.images,
       originalCode: input.originalCode,
       createdAt: Date.now(),
-      author: configStore.get('displayName') || undefined,
+      author: configStore.getState().get('displayName') || undefined,
     };
     setCodeAnnotations(prev => [...prev, annotation]);
     setSelectedAnnotationId(null);

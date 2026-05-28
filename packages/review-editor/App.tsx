@@ -810,7 +810,7 @@ const ReviewApp: React.FC = () => {
         serverConfig?: { displayName?: string; gitUser?: string };
       }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
-        configStore.init(data.serverConfig);
+        configStore.getState().init(data.serverConfig);
         // gitUser drives the "Use git name" button in Settings; stays undefined (button hidden) when unavailable
         setGitUser(data.serverConfig?.gitUser);
         const apiFiles = parseDiffToFiles(data.rawPatch);
@@ -879,7 +879,7 @@ const ReviewApp: React.FC = () => {
   }, [diffTypeSetupPending]);
 
   const handleDiffStyleChange = useCallback((style: 'split' | 'unified') => {
-    configStore.set('diffStyle', style);
+    configStore.getState().set('diffStyle', style);
   }, []);
 
   // Handle line selection from diff viewer
