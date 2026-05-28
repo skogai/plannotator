@@ -53,7 +53,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   onOtherFileAnnotationsClick,
 }) => {
   const isMobile = useIsMobile();
-  useConfigValue('displayName');
+  const displayName = useConfigValue('displayName');
   const [copiedText, setCopiedText] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const sortedAnnotations = [...annotations].sort((a, b) => a.createdA - b.createdA);
@@ -139,6 +139,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                   key={entry.annotation.id}
                   annotation={entry.annotation}
                   isSelected={selectedId === entry.annotation.id}
+                  isMe={isCurrentUser(entry.annotation.author)}
                   onSelect={() => onSelect(entry.annotation.id)}
                   onDelete={() => onDelete(entry.annotation.id)}
                   onEdit={onEdit ? (updates: Partial<Annotation>) => onEdit(entry.annotation.id, updates) : undefined}
@@ -148,6 +149,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                   key={entry.annotation.id}
                   annotation={entry.annotation}
                   isSelected={selectedId === entry.annotation.id}
+                  isMe={isCurrentUser(entry.annotation.author)}
                   onSelect={() => onSelectCodeAnnotation?.(entry.annotation.id)}
                   onDelete={() => onDeleteCodeAnnotation?.(entry.annotation.id)}
                   onEdit={onEditCodeAnnotation ? (updates: Partial<CodeAnnotation>) => onEditCodeAnnotation(entry.annotation.id, updates) : undefined}
@@ -257,10 +259,11 @@ function formatTimestamp(ts: number): string {
 const AnnotationCard: React.FC<{
   annotation: Annotation;
   isSelected: boolean;
+  isMe: boolean;
   onSelect: () => void;
   onDelete: () => void;
   onEdit?: (updates: Partial<Annotation>) => void;
-}> = ({ annotation, isSelected, onSelect, onDelete, onEdit }) => {
+}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(annotation.text || '');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -366,11 +369,11 @@ const AnnotationCard: React.FC<{
     >
       {/* Author */}
       {annotation.author && (
-        <div className={`flex items-center gap-1.5 text-[10px] font-mono truncate mb-1.5 ${isCurrentUser(annotation.author) ? 'text-muted-foreground/60' : 'text-muted-foreground'}`}>
+        <div className={`flex items-center gap-1.5 text-[10px] font-mono truncate mb-1.5 ${isMe ? 'text-muted-foreground/60' : 'text-muted-foreground'}`}>
           <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
           </svg>
-          <span className="truncate">{annotation.author}{isCurrentUser(annotation.author) && ' (me)'}</span>
+          <span className="truncate">{annotation.author}{isMe && ' (me)'}</span>
         </div>
       )}
 
@@ -525,10 +528,11 @@ const AnnotationCard: React.FC<{
 const CodeAnnotationCard: React.FC<{
   annotation: CodeAnnotation;
   isSelected: boolean;
+  isMe: boolean;
   onSelect: () => void;
   onDelete: () => void;
   onEdit?: (updates: Partial<CodeAnnotation>) => void;
-}> = ({ annotation, isSelected, onSelect, onDelete, onEdit }) => {
+}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(annotation.text || '');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -565,11 +569,11 @@ const CodeAnnotationCard: React.FC<{
       }`}
     >
       {annotation.author && (
-        <div className={`flex items-center gap-1.5 text-[10px] font-mono truncate mb-1.5 ${isCurrentUser(annotation.author) ? 'text-muted-foreground/60' : 'text-muted-foreground'}`}>
+        <div className={`flex items-center gap-1.5 text-[10px] font-mono truncate mb-1.5 ${isMe ? 'text-muted-foreground/60' : 'text-muted-foreground'}`}>
           <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
           </svg>
-          <span className="truncate">{annotation.author}{isCurrentUser(annotation.author) && ' (me)'}</span>
+          <span className="truncate">{annotation.author}{isMe && ' (me)'}</span>
         </div>
       )}
 

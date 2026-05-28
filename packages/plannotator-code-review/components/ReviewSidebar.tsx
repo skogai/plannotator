@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { CodeAnnotation, type EditorAnnotation } from '@plannotator/ui/types';
-import { isCurrentUser } from '@plannotator/ui/utils/identity';
 import { useConfigValue } from '@plannotator/ui/config';
 import { EditorAnnotationCard } from '@plannotator/ui/components/EditorAnnotationCard';
 import { CopyButton } from './CopyButton';
@@ -144,7 +143,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   onOpenPRPanel,
 }) => {
   const totalCount = annotations.length + (editorAnnotations?.length ?? 0);
-  useConfigValue('displayName');
+  const displayName = useConfigValue('displayName');
   const [copied, setCopied] = useState(false);
 
   const handleQuickCopy = async () => {
@@ -229,8 +228,8 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
               <ConventionalLabelBadge label={annotation.conventionalLabel} decorations={annotation.decorations} />
             )}
             {annotation.author && (
-              <span className={`text-[10px] truncate max-w-[100px] ${isCurrentUser(annotation.author) ? 'text-muted-foreground/50' : 'text-muted-foreground/70'}`}>
-                {annotation.author}{isCurrentUser(annotation.author) && ' (me)'}
+              <span className={`text-[10px] truncate max-w-[100px] ${annotation.author === displayName ? 'text-muted-foreground/50' : 'text-muted-foreground/70'}`}>
+                {annotation.author}{annotation.author === displayName && ' (me)'}
               </span>
             )}
           </div>
