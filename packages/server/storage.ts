@@ -10,4 +10,7 @@ export {
   getPlanVersionPath,
   getVersionCount,
   listVersions,
+  listAllHistory,
 } from "@plannotator/shared/storage";
+
+export type { HistoryIndexEntry } from "@plannotator/shared/storage";

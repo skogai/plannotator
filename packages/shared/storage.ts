@@ -253,3 +253,149 @@ export function listVersions(
     return [];
   }
 }
+
+// --- Global History Index ---
+
+const VERSION_FILE_RE = /^\d+\.md$/;
+
+/**
+ * A single entry in the global history index: one row per
+ * {project, optional worktree, slug} that has stored versions.
+ */
+export interface HistoryIndexEntry {
+  project: string;
+  worktree?: string;
+  slug: string;
+  versionCount: number;
+  /** ISO mtime of the newest version file. Empty string if none readable. */
+  latest: string;
+}
+
+/**
+ * Whether a directory is a slug dir — i.e. it directly contains at least one
+ * version file matching /^\d+\.md$/. Returns false on any read error.
+ */
+function isSlugDir(dirPath: string): boolean {
+  try {
+    const entries = readdirSync(dirPath);
+    return entries.some((e) => VERSION_FILE_RE.test(e));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Compute version count + newest mtime (ISO) for a slug dir in one pass.
+ * Returns null if the directory has no version files.
+ */
+function summarizeSlugDir(slugPath: string): { versionCount: number; latest: string } | null {
+  let entries: string[];
+  try {
+    entries = readdirSync(slugPath);
+  } catch {
+    return null;
+  }
+  let versionCount = 0;
+  let latestMs = -1;
+  let latest = "";
+  for (const entry of entries) {
+    if (!VERSION_FILE_RE.test(entry)) continue;
+    versionCount++;
+    try {
+      const stat = statSync(join(slugPath, entry));
+      const ms = stat.mtime.getTime();
+      if (ms > latestMs) {
+        latestMs = ms;
+        latest = stat.mtime.toISOString();
+      }
+    } catch {
+      // Unreadable version file: still counts, but contributes no mtime.
+    }
+  }
+  return versionCount > 0 ? { versionCount, latest } : null;
+}
+
+/**
+ * Enumerate the entire history tree under DATA_DIR/history.
+ *
+ * Layout: history/{project}/{slug}/NNN.md  OR
+ *         history/{project}/{worktreeSeg}/{slug}/NNN.md
+ *
+ * Disambiguation: a project's direct child dir is treated as a SLUG dir when it
+ * directly contains any version file (/^\d+\.md$/). Otherwise it is treated as a
+ * worktreeSeg dir and its own children are enumerated as slug dirs. Stray, empty,
+ * or malformed directories (no version files anywhere beneath) are skipped.
+ *
+ * Defensive: a missing history root returns []. Non-directories and unreadable
+ * entries are skipped rather than throwing.
+ *
+ * Returns one entry per {project, worktree?, slug} with versionCount + latest mtime.
+ */
+export function listAllHistory(): HistoryIndexEntry[] {
+  const historyRoot = join(DATA_DIR, "history");
+  const results: HistoryIndexEntry[] = [];
+
+  let projects: string[];
+  try {
+    projects = readdirSync(historyRoot);
+  } catch {
+    return results;
+  }
+
+  for (const project of projects) {
+    const projectPath = join(historyRoot, project);
+    try {
+      if (!statSync(projectPath).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+
+    let children: string[];
+    try {
+      children = readdirSync(projectPath);
+    } catch {
+      continue;
+    }
+
+    for (const child of children) {
+      const childPath = join(projectPath, child);
+      try {
+        if (!statSync(childPath).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+
+      if (isSlugDir(childPath)) {
+        // child is a slug dir directly under the project (flat layout).
+        const summary = summarizeSlugDir(childPath);
+        if (summary) {
+          results.push({ project, slug: child, ...summary });
+        }
+        continue;
+      }
+
+      // Otherwise treat child as a worktreeSeg dir and enumerate its slug dirs.
+      let slugDirs: string[];
+      try {
+        slugDirs = readdirSync(childPath);
+      } catch {
+        continue;
+      }
+      for (const slug of slugDirs) {
+        const slugPath = join(childPath, slug);
+        try {
+          if (!statSync(slugPath).isDirectory()) continue;
+        } catch {
+          continue;
+        }
+        if (!isSlugDir(slugPath)) continue; // stray/empty/non-slug dir → skip
+        const summary = summarizeSlugDir(slugPath);
+        if (summary) {
+          results.push({ project, worktree: child, slug, ...summary });
+        }
+      }
+    }
+  }
+
+  return results;
+}
