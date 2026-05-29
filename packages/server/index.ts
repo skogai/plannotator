@@ -41,6 +41,8 @@ import { isWSL } from "./browser";
 import { getPlanDeniedPrompt, getPlanToolName, buildPlanFileRule } from "@plannotator/shared/prompts";
 import { createDecisionCycle, resolveAndCycle } from "./session-handler";
 import type { SessionEventBridge, SessionRequestHandler } from "./session-handler";
+import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
+import type { AIEndpoints } from "@plannotator/ai";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -122,6 +124,9 @@ export async function createPlannotatorSession(
   });
   options.sessionEvents?.registerSnapshotProvider("session-revision", () => ({ plan, previousPlan, versionInfo }));
   const slug = generateSlug(plan);
+
+  // AI provider setup (graceful — capabilities report unavailable if no provider is registered)
+  const aiRuntime = await createAIRuntime();
 
   // Plan-specific: repo info, version history, decision promise
   let repoInfo: Awaited<ReturnType<typeof getRepoInfo>> | null = null;
@@ -298,6 +303,20 @@ export async function createPlannotatorSession(
           });
           if (externalResponse) return externalResponse;
 
+          // API: AI endpoints (Ask AI in plan review)
+          if (url.pathname.startsWith("/api/ai/")) {
+            const handler = aiRuntime.endpoints[url.pathname as keyof AIEndpoints];
+            if (handler) {
+              if (url.pathname === AI_QUERY_ENDPOINT) {
+                // Streaming SSE response: disable the daemon's per-request idle
+                // timeout so long-running AI queries are not cut off.
+                context?.disableIdleTimeout?.();
+              }
+              return handler(req);
+            }
+            return Response.json({ error: "Not found" }, { status: 404 });
+          }
+
           // API: Approve plan
           if (url.pathname === "/api/approve" && req.method === "POST") {
             let feedback: string | undefined;
@@ -427,6 +446,7 @@ export async function createPlannotatorSession(
     waitForDecision: () => decisionCycle.promise(),
     dispose: () => {
       externalAnnotations?.dispose();
+      aiRuntime.dispose();
     },
     slug,
     getSnapshot: () => ({ plan, origin }),

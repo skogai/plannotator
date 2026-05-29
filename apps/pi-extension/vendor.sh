@@ -10,8 +10,10 @@ rm -rf generated
 mkdir -p generated
 
 # Core modules Pi imports directly
+# data-dir is a transitive dep of config.ts and improvement-hooks.ts
+# (both import getPlannotatorDataDir from "./data-dir").
 for f in prompts checklist config improvement-hooks pfm-reminder \
-         plugin-binary plugin-protocol plugin-client; do
+         plugin-binary plugin-protocol plugin-client data-dir; do
   src="../../packages/shared/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/shared/%s.ts\n' "$f" | cat - "$src" > "generated/$f.ts"
 done

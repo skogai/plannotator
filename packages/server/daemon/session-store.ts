@@ -1,5 +1,5 @@
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { mkdirSync, writeFileSync, readdirSync, readFileSync } from "fs";
-import { homedir } from "os";
 import { join } from "path";
 import type {
   DaemonRemoteShareNotice,
@@ -62,7 +62,7 @@ export interface SessionSnapshot {
   content: unknown;
 }
 
-const SNAPSHOT_DIR = join(homedir(), ".plannotator", "sessions");
+const SNAPSHOT_DIR = join(getPlannotatorDataDir(), "sessions");
 const MAX_SNAPSHOT_BYTES = 5 * 1024 * 1024;
 
 function writeSnapshot(record: DaemonSessionRecord): void {

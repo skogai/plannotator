@@ -565,9 +565,9 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
           if (safeName && safeName.length > 0 && !/^\.+$/.test(safeName)) {
             try {
               const { join, resolve, sep } = await import("path");
-              const { homedir } = await import("os");
+              const { getPlannotatorDataDir } = await import("@plannotator/shared/data-dir");
               const { rmSync } = await import("fs");
-              const historyRoot = resolve(homedir(), ".plannotator", "history");
+              const historyRoot = resolve(getPlannotatorDataDir(), "history");
               const historyDir = resolve(join(historyRoot, safeName));
               if (historyDir.startsWith(historyRoot + sep)) {
                 rmSync(historyDir, { recursive: true, force: true });

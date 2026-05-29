@@ -2,9 +2,9 @@ import {
   PLANNOTATOR_DAEMON_PROTOCOL,
   PLANNOTATOR_DAEMON_PROTOCOL_VERSION,
 } from "@plannotator/shared/daemon-protocol";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { randomBytes } from "crypto";
 import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, closeSync, statSync, type Stats } from "fs";
-import { homedir } from "os";
 import { dirname, join } from "path";
 
 export const DAEMON_AUTH_QUERY_PARAM = "plannotator_auth";
@@ -73,7 +73,7 @@ export function createDaemonBrowserAuthUrl(state: DaemonState, pathname = "/"): 
 }
 
 export function getDaemonPaths(options: DaemonStateOptions = {}): DaemonPaths {
-  const dir = options.baseDir ?? join(homedir(), ".plannotator");
+  const dir = options.baseDir ?? getPlannotatorDataDir();
   return {
     dir,
     statePath: join(dir, "daemon.json"),

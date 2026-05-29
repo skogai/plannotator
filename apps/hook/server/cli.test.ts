@@ -25,6 +25,8 @@ describe("CLI top-level help", () => {
     expect(output).toContain("plannotator annotate <file.md | file.html | https://... | folder/>");
     expect(output).toContain("plannotator daemon start|status|stop");
     expect(output).toContain("plannotator plugin capabilities");
+    expect(output).toContain("plannotator annotate-last [--stdin]");
+    expect(output).toContain("plannotator setup-goal <interview|facts>");
     expect(output).toContain("running 'plannotator' without arguments is for hook integration");
   });
 });

@@ -7,11 +7,13 @@
  * Runtime-agnostic: uses only node:fs, node:path, node:os.
  */
 
-import { homedir } from "os";
 import { join, resolve, sep } from "path";
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync } from "fs";
 import { sanitizeTag } from "./project";
 import { resolveUserPath } from "./resolve-file";
+import { getPlannotatorDataDir } from "./data-dir";
+
+const DATA_DIR = getPlannotatorDataDir();
 
 /**
  * Get the plan storage directory, creating it if needed.
@@ -24,7 +26,7 @@ export function getPlanDir(customPath?: string | null): string {
   if (customPath?.trim()) {
     planDir = resolveUserPath(customPath);
   } else {
-    planDir = join(homedir(), ".plannotator", "plans");
+    planDir = join(DATA_DIR, "plans");
   }
 
   mkdirSync(planDir, { recursive: true });
@@ -108,7 +110,7 @@ export function saveFinalSnapshot(
  * Not affected by the customPath setting (that only affects decision saves).
  */
 export function getHistoryDir(project: string, slug: string): string {
-  const historyDir = join(homedir(), ".plannotator", "history", project, slug);
+  const historyDir = join(DATA_DIR, "history", project, slug);
   mkdirSync(historyDir, { recursive: true });
   return historyDir;
 }
@@ -175,7 +177,7 @@ export function getPlanVersion(
   slug: string,
   version: number
 ): string | null {
-  const historyDir = join(homedir(), ".plannotator", "history", project, slug);
+  const historyDir = join(DATA_DIR, "history", project, slug);
   const fileName = `${String(version).padStart(3, "0")}.md`;
   const filePath = join(historyDir, fileName);
 
@@ -195,7 +197,7 @@ export function getPlanVersionPath(
   slug: string,
   version: number
 ): string | null {
-  const historyDir = join(homedir(), ".plannotator", "history", project, slug);
+  const historyDir = join(DATA_DIR, "history", project, slug);
   const fileName = `${String(version).padStart(3, "0")}.md`;
   const filePath = join(historyDir, fileName);
   return existsSync(filePath) ? filePath : null;
@@ -206,7 +208,7 @@ export function getPlanVersionPath(
  * Returns 0 if the directory doesn't exist.
  */
 export function getVersionCount(project: string, slug: string): number {
-  const historyDir = join(homedir(), ".plannotator", "history", project, slug);
+  const historyDir = join(DATA_DIR, "history", project, slug);
   try {
     const entries = readdirSync(historyDir);
     return entries.filter((e) => /^\d+\.md$/.test(e)).length;
@@ -223,7 +225,7 @@ export function listVersions(
   project: string,
   slug: string
 ): Array<{ version: number; timestamp: string }> {
-  const historyDir = join(homedir(), ".plannotator", "history", project, slug);
+  const historyDir = join(DATA_DIR, "history", project, slug);
   try {
     const entries = readdirSync(historyDir);
     const versions: Array<{ version: number; timestamp: string }> = [];
@@ -245,4 +247,3 @@ export function listVersions(
     return [];
   }
 }
-

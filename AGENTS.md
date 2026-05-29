@@ -18,6 +18,13 @@ plannotator/
 │   ├── opencode-plugin/          # OpenCode plugin (binary client wrapper)
 │   │   ├── commands/             # Slash commands (plannotator-review.md, plannotator-annotate.md)
 │   │   └── index.ts              # Plugin entry — spawns plannotator binary
+│   ├── amp-plugin/               # Amp plugin
+│   │   ├── plannotator.ts        # Native Amp command-palette integration
+│   │   └── README.md             # Install and local development notes
+│   ├── droid-plugin/             # Droid plugin
+│   │   ├── .factory-plugin/plugin.json
+│   │   ├── commands/             # Slash command entrypoints
+│   │   └── lib/                  # Shared command wrapper helpers
 │   ├── marketing/                # Marketing site, docs, and blog (plannotator.ai)
 │   │   └── astro.config.mjs      # Astro 5 static site with content collections
 │   ├── paste-service/            # Paste service for short URL sharing
@@ -135,9 +142,10 @@ claude --plugin-dir ./apps/hook
 | `PLANNOTATOR_SHARE` | Set to `disabled` to turn off URL sharing entirely. Default: enabled. |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal). Default: `https://share.plannotator.ai`. |
 | `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API for short URL sharing. Default: `https://plannotator-paste.plannotator.workers.dev`. |
-| `PLANNOTATOR_ORIGIN` | Explicit agent-origin override at the top of the detection chain. Valid values: `claude-code`, `opencode`, `codex`, `copilot-cli`, `gemini-cli`. Invalid values silently fall through to env-based detection. Unset by default. |
+| `PLANNOTATOR_ORIGIN` | Explicit agent-origin override at the top of the detection chain. Valid values: `claude-code`, `amp`, `droid`, `opencode`, `codex`, `copilot-cli`, `gemini-cli`, `pi`. Invalid values silently fall through to env-based detection. Unset by default. |
 | `PLANNOTATOR_JINA` | Set to `0` / `false` to disable Jina Reader for URL annotation, or `1` / `true` to enable. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "jina": false }`) or per-invocation via `--no-jina`. |
 | `JINA_API_KEY` | Optional Jina Reader API key for higher rate limits (500 RPM vs 20 RPM unauthenticated). Free keys include 10M tokens. |
+| `PLANNOTATOR_DATA_DIR` | Override the base data directory. Supports `~` expansion. Default: `~/.plannotator`. All data (plans, history, drafts, config, hooks, sessions, debug logs, IPC registry) is stored under this directory. |
 | `PLANNOTATOR_VERIFY_ATTESTATION` | **Read by the install scripts only**, not by the runtime binary. Set to `1` / `true` to have `scripts/install.sh` / `install.ps1` / `install.cmd` run `gh attestation verify` on every install. Off by default. Can also be set persistently via `~/.plannotator/config.json` (`{ "verifyAttestation": true }`) or per-invocation via `--verify-attestation`. Requires `gh` installed and authenticated. |
 
 **Config-only settings (`~/.plannotator/config.json`)**: Some settings have no env-var equivalent and are toggled by editing the config file directly:
@@ -187,6 +195,23 @@ User annotates code, provides feedback
 Send Feedback → feedback sent to agent session
 Approve → "LGTM" sent to agent session
 ```
+
+## Ask AI Provider Defaults
+
+Ask AI providers are detected independently from installed/authenticated local CLIs, then the UI picks a default from the detected Plannotator origin. The mapping lives in `packages/shared/agents.ts` and is applied by `packages/ui/utils/aiProvider.ts`:
+
+| Origin | Preferred Ask AI provider |
+|--------|---------------------------|
+| `claude-code` | `claude-agent-sdk` |
+| `amp` | no dedicated provider; fallback to saved/server default |
+| `droid` | no dedicated provider; fallback to saved/server default |
+| `codex` | `codex-sdk` |
+| `opencode` | `opencode-sdk` |
+| `pi` | `pi-sdk` |
+| `copilot-cli` | no dedicated provider; fallback to saved/server default |
+| `gemini-cli` | no dedicated provider; fallback to saved/server default |
+
+Per-origin choices are persisted in cookies, so a user can override the automatic match for one agent without changing the default for another.
 
 ## Annotate Flow
 
@@ -269,6 +294,12 @@ When a user denies a plan (or sends feedback on a review/annotation), the sessio
 | `/api/draft`          | GET/POST/DELETE | Auto-save annotation drafts to survive server crashes |
 | `/api/editor-annotations` | GET | List editor annotations (VS Code only) |
 | `/api/editor-annotation` | POST/DELETE | Add or remove an editor annotation (VS Code only) |
+| `/api/ai/capabilities` | GET | Check if AI features are available |
+| `/api/ai/session` | POST | Create or fork an AI session |
+| `/api/ai/query` | POST | Send a message and stream the response (SSE) |
+| `/api/ai/abort` | POST | Abort the current query |
+| `/api/ai/permission` | POST | Respond to a permission request |
+| `/api/ai/sessions` | GET | List active sessions |
 | `/api/external-annotations` | GET | Snapshot of external annotations (`?since=N` for version gating) |
 | `/api/external-annotations` | POST | Add external annotations (single or batch `{ annotations: [...] }`) |
 | `/api/external-annotations` | PATCH | Update fields on a single annotation (`?id=`) |
@@ -326,6 +357,12 @@ When a user denies a plan (or sends feedback on a review/annotation), the sessio
 | `/api/doc`            | GET    | Serve linked .md/.mdx/.html file or code file (`?path=<path>&base=<dir>`) |
 | `/api/doc/exists`     | POST   | Batch-validate code-file paths (body: `{ paths: string[], base?: string }`) |
 | `/api/draft`          | GET/POST/DELETE | Auto-save annotation drafts to survive server crashes |
+| `/api/ai/capabilities` | GET | Check if AI features are available |
+| `/api/ai/session` | POST | Create or fork an AI session |
+| `/api/ai/query` | POST | Send a message and stream the response (SSE) |
+| `/api/ai/abort` | POST | Abort the current query |
+| `/api/ai/permission` | POST | Respond to a permission request |
+| `/api/ai/sessions` | GET | List active sessions |
 | `/api/external-annotations` | GET | Snapshot of external annotations (`?since=N` for version gating) |
 | `/api/external-annotations` | POST | Add external annotations (single or batch `{ annotations: [...] }`) |
 | `/api/external-annotations` | PATCH | Update fields on a single annotation (`?id=`) |

@@ -26,6 +26,8 @@ import { isWSL } from "./browser";
 import { getAnnotateFileFeedbackPrompt, getAnnotateMessageFeedbackPrompt, excerptAndBlockquote } from "@plannotator/shared/prompts";
 import { createDecisionCycle, resolveAndCycle } from "./session-handler";
 import type { SessionEventBridge, SessionRequestHandler } from "./session-handler";
+import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
+import type { AIEndpoints } from "@plannotator/ai";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -126,6 +128,9 @@ export async function createAnnotateSession(
     plan: markdown, previousPlan, versionInfo,
     ...(rawHtml !== undefined && { rawHtml }),
   }));
+
+  // AI provider setup (graceful — capabilities report unavailable if no provider is registered)
+  const aiRuntime = await createAIRuntime();
 
   // Detect repo info (cached for this session)
   const repoInfo = await getRepoInfo(cwd);
@@ -257,6 +262,20 @@ export async function createAnnotateSession(
           });
           if (externalResponse) return externalResponse;
 
+          // API: AI endpoints (Ask AI in annotate)
+          if (url.pathname.startsWith("/api/ai/")) {
+            const handler = aiRuntime.endpoints[url.pathname as keyof AIEndpoints];
+            if (handler) {
+              if (url.pathname === AI_QUERY_ENDPOINT) {
+                // Streaming SSE response: disable the daemon's per-request idle
+                // timeout so long-running AI queries are not cut off.
+                context?.disableIdleTimeout?.();
+              }
+              return handler(req);
+            }
+            return Response.json({ error: "Not found" }, { status: 404 });
+          }
+
           // API: Exit annotation session without feedback
           if (url.pathname === "/api/exit" && req.method === "POST") {
             deleteDraft(draftKey);
@@ -347,6 +366,7 @@ export async function createAnnotateSession(
     waitForDecision: () => decisionCycle.promise(),
     dispose: () => {
       externalAnnotations.dispose();
+      aiRuntime.dispose();
     },
     getSnapshot: isFileBased ? () => ({ plan: markdown, filePath, mode, sourceInfo }) : undefined,
     updateContent: handleUpdateContent,

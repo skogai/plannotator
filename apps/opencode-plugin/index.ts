@@ -16,8 +16,9 @@
  */
 
 import { type Plugin, tool } from "@opencode-ai/plugin";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import path from "path";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 
 // OpenCode's @hono/node-server patches global.Response with a polyfill that
 // Bun.serve() doesn't accept (it checks native type tags, not instanceof).
@@ -54,6 +55,7 @@ import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import {
   stripConflictingPlanModeRules,
 } from "./plan-mode";
+import { sanitizeTag } from "@plannotator/shared/project";
 import {
   applyWorkflowConfig,
   isPlanningAgent,
@@ -85,12 +87,13 @@ interface PlanEdit {
 }
 
 /**
- * Backing file for the current plan. Managed entirely by the plugin;
+ * Backing file for the current plan. Stored outside the workspace in
+ * `~/.plannotator/active/{project}/_active-plan.md` so it never appears
+ * in git status or editor file trees. Managed entirely by the plugin;
  * the agent never sees or touches this file directly.
  */
-export function getPlanBackingPath(directory: string): string {
-  const planDir = path.join(directory, ".opencode", "plans");
-  return path.join(planDir, "_active-plan.md");
+export function getPlanBackingPath(project: string): string {
+  return path.join(getPlannotatorDataDir(), "active", project, "_active-plan.md");
 }
 
 /**
@@ -143,7 +146,11 @@ export function validateEdits(existingLines: string[], edits: PlanEdit[]): strin
       if (!Number.isInteger(edit.end) || edit.end < edit.start) {
         return `end (${edit.end}) must be >= start (${edit.start})`;
       }
-      if (edit.end > lineCount) {
+      // On an empty file (lineCount === 0) every edit is a pure insert;
+      // end is semantically meaningless and applyEdits handles it via splice
+      // clamping. Rejecting here breaks first-call payloads where the agent
+      // or framework includes end (see #742).
+      if (edit.end > lineCount && lineCount > 0) {
         return `end (${edit.end}) exceeds file length (${lineCount})`;
       }
     }
@@ -514,7 +521,8 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
           }
 
           // Read existing backing file (empty on first call)
-          const backingPath = getPlanBackingPath(ctx.directory);
+          const project = sanitizeTag(path.basename(ctx.directory)) || "_unknown";
+          const backingPath = getPlanBackingPath(project);
           const backingDir = path.dirname(backingPath);
           mkdirSync(backingDir, { recursive: true });
 
@@ -593,6 +601,9 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
           const result = response.result;
 
           if (result.approved) {
+            // Clean up backing file after approval
+            try { unlinkSync(backingPath); } catch { /* already gone */ }
+
             const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== 'disabled';
             const targetAgent = result.agentSwitch || 'build';
 

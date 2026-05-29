@@ -1,4 +1,5 @@
 import type { DaemonProjectEntry } from "@plannotator/shared/daemon-protocol";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { execSync } from "child_process";
 import { homedir } from "os";
@@ -9,7 +10,7 @@ export interface ProjectRegistryOptions {
 }
 
 function registryPath(options: ProjectRegistryOptions = {}): string {
-  const dir = options.baseDir ?? join(homedir(), ".plannotator");
+  const dir = options.baseDir ?? getPlannotatorDataDir();
   return join(dir, "projects.json");
 }
 
