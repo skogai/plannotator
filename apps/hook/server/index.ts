@@ -680,7 +680,12 @@ async function runDaemonSessionRequest(request: PluginRequest, options: { plugin
     };
   } catch (err) {
     unregisterInterruptCleanup?.();
-    await cancelCreatedSession();
+    // Deliberately do NOT cancel the session here. A client-side failure while
+    // waiting for the result (e.g. a dropped long-poll connection) must not tear
+    // down a session that is alive and working in the browser — sessions never
+    // die. Leaving it up lets the tab keep functioning and the agent re-attach to
+    // the same session via its match key on resubmit. Genuine user aborts are
+    // handled separately by the SIGINT/SIGTERM cleanup handler.
     fail("daemon-session-failed", errorMessage(err));
   }
 }

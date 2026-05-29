@@ -22,6 +22,14 @@ export type DaemonDiscoveryResult =
   | { ok: true; state: DaemonState; status: DaemonStatus; client: DaemonClient }
   | { ok: false; code: "missing" | "stale" | "malformed" | "incompatible" | "unhealthy" | "mismatch"; message: string; state?: unknown };
 
+interface DaemonRequestOptions {
+  /** Disable the client-side request timeout (for long-poll routes like waitForResult). */
+  noTimeout?: boolean;
+}
+
+/** RequestInit plus Bun's non-standard `timeout` extension (`false` disables the default ~5min timeout). */
+type BunRequestInit = RequestInit & { timeout?: boolean };
+
 export class DaemonClient {
   readonly state: DaemonState;
   private readonly fetchImpl: typeof fetch;
@@ -51,7 +59,13 @@ export class DaemonClient {
   }
 
   async waitForResult<T = unknown>(id: string): Promise<DaemonSessionResultResponse<T> | DaemonErrorResponse> {
-    return this.getJson(`/daemon/sessions/${encodeURIComponent(id)}/result`) as Promise<DaemonSessionResultResponse<T> | DaemonErrorResponse>;
+    // This is a long-poll: the daemon holds the response open until the user
+    // acts on the session (which can take far longer than any normal request).
+    // Disable the client-side timeout so the wait lasts as long as the review
+    // takes — the daemon already disables its own idle timeout for this route.
+    return this.getJson(`/daemon/sessions/${encodeURIComponent(id)}/result`, {
+      noTimeout: true,
+    }) as Promise<DaemonSessionResultResponse<T> | DaemonErrorResponse>;
   }
 
   async cancelSession(id: string): Promise<DaemonCancelSessionResponse | DaemonErrorResponse> {
@@ -68,11 +82,11 @@ export class DaemonClient {
     }) as Promise<DaemonShutdownResponse | DaemonErrorResponse>;
   }
 
-  async getJson(path: string): Promise<unknown> {
-    return this.requestJson(path, { method: "GET" });
+  async getJson(path: string, opts: DaemonRequestOptions = {}): Promise<unknown> {
+    return this.requestJson(path, { method: "GET" }, opts);
   }
 
-  private async requestJson(path: string, init: RequestInit): Promise<unknown> {
+  private async requestJson(path: string, init: RequestInit, opts: DaemonRequestOptions = {}): Promise<unknown> {
     const headers = new Headers(init.headers);
     if (init.body && !headers.has("content-type")) headers.set("content-type", "application/json");
     if (path !== "/daemon/capabilities") {
@@ -82,10 +96,15 @@ export class DaemonClient {
       }
     }
 
-    const res = await this.fetchImpl(`${this.state.baseUrl}${path}`, {
-      ...init,
-      headers,
-    });
+    const requestInit: BunRequestInit = { ...init, headers };
+    // Bun's fetch applies a default ~5-minute timeout to every request. For
+    // long-poll routes that intentionally hold the connection open (waitForResult),
+    // disable it so the client matches the daemon, which already calls
+    // server.timeout(req, 0) on these requests. Without this the client aborts at
+    // ~300s and tears the session down on its way out.
+    if (opts.noTimeout) requestInit.timeout = false;
+
+    const res = await this.fetchImpl(`${this.state.baseUrl}${path}`, requestInit);
     try {
       return await res.json();
     } catch {
