@@ -189,6 +189,15 @@ Originally scoped in `goals/performance/backlog/configstore-zustand-migration.md
 
 ---
 
+## Amp plugin: publish bundled dist for standalone (curl) install
+
+**Priority:** Medium (release-pipeline)
+**Size:** Small
+
+`apps/amp-plugin/plannotator.ts` was refactored to a thin wrapper that imports `@plannotator/shared/plugin-client` (PR #816 / merge cleanup). That resolves fine inside the workspace, but a **standalone curl install** of the Amp plugin has no workspace and can't resolve `@plannotator/shared`. The release pipeline must build and publish a **bundled** `apps/amp-plugin/dist/plannotator.ts` (deps inlined) — mirroring how the other curl-distributed plugins ship — so Amp works when installed outside the monorepo. Surfaced by the Amp-conformance verdict; not a merge blocker.
+
+---
+
 ## Global keyboard registry cleanup
 
 **Priority:** Medium
