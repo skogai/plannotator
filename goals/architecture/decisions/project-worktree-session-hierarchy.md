@@ -29,13 +29,19 @@ project -> worktree -> session
 3. **If a session belongs to a worktree, that worktree must belong to the same
    project the session belongs to.** A session can never reference a worktree of a
    different project.
-4. **A worktree belongs to exactly one project** (its root/main repository). A
-   worktree never floats free and is never itself a project.
+4. **A worktree belongs to exactly one project.** "Worktree" is the **sub-scope
+   tier** generally — a git worktree, **or** a sub-repo sitting under a declared
+   (often non-git) workspace root. Its owning project is the project it *resolves
+   under*: the **main repo** for a true git worktree, or the **declared workspace
+   root** for a sub-repo (e.g. `mygroup/a` → project `mygroup`, worktree `a`). A
+   worktree never floats free and is never itself a top-level project.
 5. **Resolution at launch time:**
    - Launched in a normal repo/directory → `project = that repo`, `worktree = none`.
    - Launched in a git worktree → `project = the root/main repo`, `worktree = that
-     worktree`. The session rolls up to the root project and is *tagged* with the
-     worktree it came from.
+     worktree`. The session rolls up to the root project, tagged with the worktree.
+   - Launched under a **declared workspace root** → `project = the declared root`,
+     `worktree = the sub-repo/worktree you're in` (or none if directly in the root).
+     This is how the non-git `mygroup/` workspace of sibling repos is modeled.
 
 ---
 
