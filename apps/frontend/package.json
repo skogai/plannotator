@@ -15,7 +15,7 @@
     "check": "bun run typecheck && bun run lint && bun run fmt:check && bun run test"
   },
   "dependencies": {
-    "@fontsource-variable/geist-mono": "^5.2.7",
+    "@fontsource-variable/geist-mono": "5.2.7",
     "@fontsource-variable/instrument-sans": "^5.2.8",
     "@fontsource-variable/inter": "^5.2.8",
     "@plannotator/code-review": "workspace:*",

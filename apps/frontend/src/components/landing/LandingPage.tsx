@@ -146,7 +146,17 @@ export function LandingPage({ onAddProject }: LandingPageProps) {
               <main className="flex h-full items-center justify-center overflow-auto">
                 <div className="w-full max-w-2xl px-6">
                   <pre
+                    // ASCII art must render in a guaranteed-monospace font. Use Geist
+                    // Mono (the app's mono face) for the intended look, with a system
+                    // monospace fallback so a failed or re-broken webfont still draws
+                    // aligned, legible art instead of proportional mush. The geist-mono
+                    // dependency is pinned to an exact version because a 5.2.8 patch
+                    // once shifted its line-box metrics and overlapped these rows.
                     className="mb-8 select-none overflow-x-auto text-[5px] leading-[1.2] text-foreground/70 sm:text-[6px] md:text-[7px]"
+                    style={{
+                      fontFamily:
+                        '"Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',
+                    }}
                     aria-hidden="true"
                   >
                     {ASCII_BANNER}
