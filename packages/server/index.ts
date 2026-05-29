@@ -74,6 +74,10 @@ export interface ServerOptions {
   opencodeClient?: OpencodeClient;
   /** Optional daemon event bridge for live session-scoped events. */
   sessionEvents?: SessionEventBridge;
+  /** Resolved owning project name for history keying. Absent → detectProjectName(cwd) fallback. */
+  project?: string;
+  /** Worktree segment for history keying. Present only if the session sits in a worktree. */
+  worktreeSeg?: string;
 }
 
 
@@ -100,7 +104,7 @@ export interface PlannotatorSession {
 export async function createPlannotatorSession(
   options: ServerOptions
 ): Promise<PlannotatorSession> {
-  const { cwd = process.cwd(), plan: initialPlan, origin, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, planFilePath } = options;
+  const { cwd = process.cwd(), plan: initialPlan, origin, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, planFilePath, project: optionalProject, worktreeSeg } = options;
   let plan = initialPlan;
   const resolvePlanStoragePath = (customPath?: string | null): string | undefined => {
     if (!customPath?.trim()) return undefined;
@@ -147,16 +151,16 @@ export async function createPlannotatorSession(
   let lastDecision: 'approved' | 'denied' | null = null;
 
   repoInfo = await getRepoInfo(cwd);
-  project = (await detectProjectName(cwd)) ?? "_unknown";
-  const historyResult = saveToHistory(project, slug, plan);
+  project = optionalProject ?? (await detectProjectName(cwd)) ?? "_unknown";
+  const historyResult = saveToHistory(project, slug, plan, worktreeSeg);
   currentPlanPath = historyResult.path;
   previousPlan =
     historyResult.version > 1
-      ? getPlanVersion(project, slug, historyResult.version - 1)
+      ? getPlanVersion(project, slug, historyResult.version - 1, worktreeSeg)
       : null;
   versionInfo = {
     version: historyResult.version,
-    totalVersions: getVersionCount(project, slug),
+    totalVersions: getVersionCount(project, slug, worktreeSeg),
     project,
   };
 
@@ -172,7 +176,7 @@ export async function createPlannotatorSession(
             if (isNaN(v) || v < 1) {
               return new Response("Invalid version number", { status: 400 });
             }
-            const content = getPlanVersion(project, slug, v);
+            const content = getPlanVersion(project, slug, v, worktreeSeg);
             if (content === null) {
               return Response.json({ error: "Version not found" }, { status: 404 });
             }
@@ -184,7 +188,7 @@ export async function createPlannotatorSession(
             return Response.json({
               project,
               slug,
-              versions: listVersions(project, slug),
+              versions: listVersions(project, slug, worktreeSeg),
             });
           }
 
@@ -260,7 +264,7 @@ export async function createPlannotatorSession(
                 return Response.json({ error: "Missing baseVersion" }, { status: 400 });
               }
 
-              const basePath = getPlanVersionPath(project, slug, body.baseVersion);
+              const basePath = getPlanVersionPath(project, slug, body.baseVersion, worktreeSeg);
               if (!basePath) {
                 return Response.json({ error: `Version ${body.baseVersion} not found` }, { status: 404 });
               }
@@ -424,14 +428,14 @@ export async function createPlannotatorSession(
   function handleUpdateContent(newPlan: string) {
     plan = newPlan;
     lastDecision = null;
-    const historyResult = saveToHistory(project, slug, newPlan);
+    const historyResult = saveToHistory(project, slug, newPlan, worktreeSeg);
     currentPlanPath = historyResult.path;
     previousPlan = historyResult.version > 1
-      ? getPlanVersion(project, slug, historyResult.version - 1)
+      ? getPlanVersion(project, slug, historyResult.version - 1, worktreeSeg)
       : null;
     versionInfo = {
       version: historyResult.version,
-      totalVersions: getVersionCount(project, slug),
+      totalVersions: getVersionCount(project, slug, worktreeSeg),
       project,
     };
     externalAnnotations?.clearAll();

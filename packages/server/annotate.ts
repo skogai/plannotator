@@ -70,6 +70,10 @@ export interface AnnotateServerOptions {
   onReady?: (url: string, isRemote: boolean, port: number) => void;
   /** Optional daemon event bridge for live session-scoped events. */
   sessionEvents?: SessionEventBridge;
+  /** Resolved owning project name for history keying. Absent → detectProjectName(cwd) fallback. */
+  project?: string;
+  /** Worktree segment for history keying. Present only if the session sits in a worktree. */
+  worktreeSeg?: string;
 }
 
 export interface AnnotateSession {
@@ -105,6 +109,8 @@ export async function createAnnotateSession(
     gate = false,
     rawHtml: initialRawHtml,
     renderHtml = false,
+    project: optionalProject,
+    worktreeSeg,
   } = options;
   let markdown = initialMarkdown;
   let rawHtml = initialRawHtml;
@@ -137,19 +143,19 @@ export async function createAnnotateSession(
 
   // Version history (single-file annotate only — folders have no single document to track)
   const isFileBased = mode === "annotate";
-  const project = isFileBased ? ((await detectProjectName(cwd)) ?? "_unknown") : "";
+  const project = isFileBased ? (optionalProject ?? (await detectProjectName(cwd)) ?? "_unknown") : "";
   const slug = isFileBased ? generateSlug(markdown) : "";
   let previousPlan: string | null = null;
   let versionInfo: { version: number; totalVersions: number; project: string } | null = null;
 
   if (isFileBased && markdown.trim()) {
-    const historyResult = saveToHistory(project, slug, markdown);
+    const historyResult = saveToHistory(project, slug, markdown, worktreeSeg);
     previousPlan = historyResult.version > 1
-      ? getPlanVersion(project, slug, historyResult.version - 1)
+      ? getPlanVersion(project, slug, historyResult.version - 1, worktreeSeg)
       : null;
     versionInfo = {
       version: historyResult.version,
-      totalVersions: getVersionCount(project, slug),
+      totalVersions: getVersionCount(project, slug, worktreeSeg),
       project,
     };
   }
@@ -191,14 +197,14 @@ export async function createAnnotateSession(
             if (!vParam) return new Response("Missing v parameter", { status: 400 });
             const v = parseInt(vParam, 10);
             if (isNaN(v) || v < 1) return new Response("Invalid version number", { status: 400 });
-            const content = getPlanVersion(project, slug, v);
+            const content = getPlanVersion(project, slug, v, worktreeSeg);
             if (content === null) return Response.json({ error: "Version not found" }, { status: 404 });
             return Response.json({ plan: content, version: v });
           }
 
           // API: List all versions
           if (url.pathname === "/api/plan/versions" && isFileBased) {
-            return Response.json({ project, slug, versions: listVersions(project, slug) });
+            return Response.json({ project, slug, versions: listVersions(project, slug, worktreeSeg) });
           }
 
           // API: Update user config (write-back to ~/.plannotator/config.json)
@@ -342,13 +348,13 @@ export async function createAnnotateSession(
     lastDecision = null;
     rawHtml = newRawHtml;
     if (isFileBased && newMarkdown.trim()) {
-      const historyResult = saveToHistory(project, slug, newMarkdown);
+      const historyResult = saveToHistory(project, slug, newMarkdown, worktreeSeg);
       previousPlan = historyResult.version > 1
-        ? getPlanVersion(project, slug, historyResult.version - 1)
+        ? getPlanVersion(project, slug, historyResult.version - 1, worktreeSeg)
         : null;
       versionInfo = {
         version: historyResult.version,
-        totalVersions: getVersionCount(project, slug),
+        totalVersions: getVersionCount(project, slug, worktreeSeg),
         project,
       };
     }

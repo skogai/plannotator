@@ -32,6 +32,7 @@ import { createReviewSession } from "../review";
 import { createRemoteShareNotice } from "../share-url";
 import { registerResolvedProject } from "./project-registry";
 import { resolveProject } from "./project-resolver";
+import { sanitizeTag } from "@plannotator/shared/project";
 import {
   gitRuntime,
   prepareLocalReviewDiff,
@@ -595,6 +596,12 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
     // matchKey discriminator: the operational scope (worktree/sub-repo, else project
     // root) so distinct worktrees of one project don't collide on reactivation.
     const scopeKey = worktree?.cwd ?? projectCwd;
+    // History keying segment: nest worktree history under a worktree segment so
+    // distinct worktrees of one project never collide/shadow each other. Coalesce
+    // an unsanitizable branch (e.g. <2 chars) to undefined → flat layout.
+    const worktreeSeg = worktree
+      ? sanitizeTag(worktree.branch || basename(worktree.cwd)) ?? undefined
+      : undefined;
     try {
       const tmp = tmpdir();
       if (!cwd.startsWith(tmp)) registerResolvedProject(resolved);
@@ -638,6 +645,8 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         shareBaseUrl,
         pasteApiUrl,
         sessionEvents,
+        project,
+        worktreeSeg,
         opencodeClient: request.availableAgents
           ? { app: { agents: async () => ({ data: request.availableAgents }) } }
           : undefined,
@@ -698,6 +707,8 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         shareBaseUrl,
         pasteApiUrl,
         sessionEvents,
+        project,
+        worktreeSeg,
       });
       const record = context.store.create({
         id,

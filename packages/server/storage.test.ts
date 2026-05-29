@@ -7,8 +7,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { generateSlug, getPlanDir, savePlan, saveToHistory, getPlanVersion, getVersionCount, listVersions } from "./storage";
+import { join, sep } from "node:path";
+import { generateSlug, getPlanDir, savePlan, saveToHistory, getPlanVersion, getPlanVersionPath, getVersionCount, listVersions } from "./storage";
+import { sanitizeTag } from "./project";
 
 const tempDirs: string[] = [];
 
@@ -172,5 +173,102 @@ describe("listVersions", () => {
     expect(versions[0].version).toBe(1);
     expect(versions[1].version).toBe(2);
     expect(versions[0].timestamp).toBeTruthy();
+  });
+});
+
+describe("history with worktreeSeg", () => {
+  test("nests history under the worktree segment when present", () => {
+    const slug = `wt-present-${Date.now()}`;
+    const result = saveToHistory("proj", slug, "# V1", "feature-branch");
+    expect(result.version).toBe(1);
+    expect(result.path).toContain(`history${sep}proj${sep}feature-branch${sep}${slug}`);
+  });
+
+  test("writes flat layout when worktreeSeg is absent (back-compat)", () => {
+    const slug = `flat-absent-${Date.now()}`;
+    const result = saveToHistory("flatproj", slug, "# C");
+    expect(result.version).toBe(1);
+    // No extra segment between project and slug — path ends in proj/slug/001.md directly.
+    expect(result.path).toEndWith(`history${sep}flatproj${sep}${slug}${sep}001.md`);
+    expect(getPlanVersion("flatproj", slug, 1)).toBe("# C");
+    expect(getVersionCount("flatproj", slug)).toBe(1);
+  });
+
+  test("isolates segments so reader==writer never crosses worktrees", () => {
+    const slug = `wt-iso-${Date.now()}`;
+    // branch-a gets 2 versions, branch-b gets 1, flat layout gets none.
+    saveToHistory("proj", slug, "# A1", "branch-a");
+    saveToHistory("proj", slug, "# A2", "branch-a");
+    saveToHistory("proj", slug, "# B1", "branch-b");
+
+    expect(getVersionCount("proj", slug, "branch-a")).toBe(2);
+    expect(getVersionCount("proj", slug, "branch-b")).toBe(1);
+    expect(getVersionCount("proj", slug)).toBe(0);
+
+    expect(getPlanVersion("proj", slug, 1, "branch-a")).toBe("# A1");
+    expect(getPlanVersion("proj", slug, 1, "branch-b")).toBe("# B1");
+    expect(getPlanVersion("proj", slug, 1)).toBeNull();
+
+    const aVersions = listVersions("proj", slug, "branch-a");
+    expect(aVersions).toHaveLength(2);
+    expect(aVersions[0].version).toBe(1);
+    expect(aVersions[1].version).toBe(2);
+
+    const bVersions = listVersions("proj", slug, "branch-b");
+    expect(bVersions).toHaveLength(1);
+    expect(bVersions[0].version).toBe(1);
+
+    expect(listVersions("proj", slug)).toEqual([]);
+  });
+
+  test("getPlanVersionPath returns the segmented path or null", () => {
+    const slug = `wt-path-${Date.now()}`;
+    saveToHistory("proj", slug, "# V1", "branch-x");
+    const path = getPlanVersionPath("proj", slug, 1, "branch-x");
+    expect(path).not.toBeNull();
+    expect(path!).toContain(`history${sep}proj${sep}branch-x${sep}${slug}`);
+    expect(path!).toEndWith(`001.md`);
+    // Missing version → null.
+    expect(getPlanVersionPath("proj", slug, 99, "branch-x")).toBeNull();
+    // Wrong segment → null (no shadowing).
+    expect(getPlanVersionPath("proj", slug, 1, "branch-y")).toBeNull();
+  });
+
+  test("detached worktree → segment derived from basename", () => {
+    const slug = `wt-detached-${Date.now()}`;
+    // Mirror session-factory: no branch → sanitizeTag(basename(worktree.cwd)).
+    const seg = sanitizeTag("my-wt-dir") ?? undefined;
+    expect(seg).toBe("my-wt-dir");
+    const result = saveToHistory("proj", slug, "# V1", seg);
+    expect(result.path).toContain(`history${sep}proj${sep}my-wt-dir${sep}${slug}`);
+  });
+
+  test("branch with slashes collapses to a single dir level", () => {
+    const slug = `wt-slash-${Date.now()}`;
+    const seg = sanitizeTag("feature/foo") ?? undefined;
+    expect(seg).toBe("featurefoo");
+    const result = saveToHistory("proj", slug, "# V1", seg);
+    expect(result.path).toContain(`history${sep}proj${sep}featurefoo${sep}${slug}`);
+    // Never a nested feature/foo directory tree.
+    expect(result.path).not.toContain(`history${sep}proj${sep}feature${sep}foo`);
+  });
+
+  test("no worktree → undefined segment → flat layout", () => {
+    const slug = `wt-none-${Date.now()}`;
+    const worktree: { branch?: string; cwd: string } | undefined = undefined;
+    const seg = worktree ? sanitizeTag((worktree as any).branch || "") ?? undefined : undefined;
+    expect(seg).toBeUndefined();
+    const result = saveToHistory("proj", slug, "# V1", seg);
+    expect(result.path).toContain(`history${sep}proj${sep}${slug}`);
+  });
+});
+
+describe("worktreeSeg formula (sanitizeTag)", () => {
+  test("strips slashes from branch names", () => {
+    expect(sanitizeTag("feature/foo")).toBe("featurefoo");
+  });
+
+  test("preserves 2-char segments (does not coalesce to null)", () => {
+    expect(sanitizeTag("ab")).toBe("ab");
   });
 });

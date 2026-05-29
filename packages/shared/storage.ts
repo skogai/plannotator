@@ -106,11 +106,13 @@ export function saveFinalSnapshot(
 
 /**
  * Get the history directory for a project/slug combination, creating it if needed.
- * History is always stored in ~/.plannotator/history/{project}/{slug}/.
+ * History is stored in ~/.plannotator/history/{project}/{worktreeSeg?}/{slug}/.
+ * The optional worktreeSeg segment is present only when the session sits in a
+ * worktree, so distinct worktrees of one project never collide.
  * Not affected by the customPath setting (that only affects decision saves).
  */
-export function getHistoryDir(project: string, slug: string): string {
-  const historyDir = join(DATA_DIR, "history", project, slug);
+export function getHistoryDir(project: string, slug: string, worktreeSeg?: string): string {
+  const historyDir = join(DATA_DIR, "history", project, ...(worktreeSeg ? [worktreeSeg] : []), slug);
   mkdirSync(historyDir, { recursive: true });
   return historyDir;
 }
@@ -144,9 +146,10 @@ function getNextVersionNumber(historyDir: string): number {
 export function saveToHistory(
   project: string,
   slug: string,
-  plan: string
+  plan: string,
+  worktreeSeg?: string
 ): { version: number; path: string; isNew: boolean } {
-  const historyDir = getHistoryDir(project, slug);
+  const historyDir = getHistoryDir(project, slug, worktreeSeg);
   const nextVersion = getNextVersionNumber(historyDir);
 
   // Deduplicate: check if latest version has identical content
@@ -175,9 +178,10 @@ export function saveToHistory(
 export function getPlanVersion(
   project: string,
   slug: string,
-  version: number
+  version: number,
+  worktreeSeg?: string
 ): string | null {
-  const historyDir = join(DATA_DIR, "history", project, slug);
+  const historyDir = join(DATA_DIR, "history", project, ...(worktreeSeg ? [worktreeSeg] : []), slug);
   const fileName = `${String(version).padStart(3, "0")}.md`;
   const filePath = join(historyDir, fileName);
 
@@ -195,9 +199,10 @@ export function getPlanVersion(
 export function getPlanVersionPath(
   project: string,
   slug: string,
-  version: number
+  version: number,
+  worktreeSeg?: string
 ): string | null {
-  const historyDir = join(DATA_DIR, "history", project, slug);
+  const historyDir = join(DATA_DIR, "history", project, ...(worktreeSeg ? [worktreeSeg] : []), slug);
   const fileName = `${String(version).padStart(3, "0")}.md`;
   const filePath = join(historyDir, fileName);
   return existsSync(filePath) ? filePath : null;
@@ -207,8 +212,8 @@ export function getPlanVersionPath(
  * Get the number of versions stored for a project/slug.
  * Returns 0 if the directory doesn't exist.
  */
-export function getVersionCount(project: string, slug: string): number {
-  const historyDir = join(DATA_DIR, "history", project, slug);
+export function getVersionCount(project: string, slug: string, worktreeSeg?: string): number {
+  const historyDir = join(DATA_DIR, "history", project, ...(worktreeSeg ? [worktreeSeg] : []), slug);
   try {
     const entries = readdirSync(historyDir);
     return entries.filter((e) => /^\d+\.md$/.test(e)).length;
@@ -223,9 +228,10 @@ export function getVersionCount(project: string, slug: string): number {
  */
 export function listVersions(
   project: string,
-  slug: string
+  slug: string,
+  worktreeSeg?: string
 ): Array<{ version: number; timestamp: string }> {
-  const historyDir = join(DATA_DIR, "history", project, slug);
+  const historyDir = join(DATA_DIR, "history", project, ...(worktreeSeg ? [worktreeSeg] : []), slug);
   try {
     const entries = readdirSync(historyDir);
     const versions: Array<{ version: number; timestamp: string }> = [];
