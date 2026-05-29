@@ -2,6 +2,17 @@
 
 Comprehensive sweep of performance killers in the multi-session keep-alive architecture. The app feels generally slow with 3+ sessions open — not during specific actions, but during normal use: scrolling, clicking files, hovering, navigating.
 
+> [!NOTE]
+> **Status — re-inventoried 2026-05-28 against HEAD `6e65aa37` (post main-merge): 8 fixed · 2 partial · 29 open.**
+> The cross-session-interference tier (hidden sessions corrupting the active one) is largely resolved; the heavy *structural* work remains and is the biggest lever left on perceived speed.
+>
+> - **Fixed (8):** #1 SessionSurface memoized · #6 StickyHeaderLane scoped to container · #7 CSS-property writes scoped to session root · #10 PlanCleanDiffView scoped · #11 TableOfContents scoped · #12 `document.title` visibility-guarded · #24 + #30 configStore → Zustand selectors (PR #808).
+> - **Partial (2):** #8 ThemeProvider still writes global `document` theme classes · #18 split-drag has a ref cache but still `setState`s per pointermove.
+> - **Open (29):** #2 #3 #4 #5 #9 #13 #14 #15 #16 #17 #19 #20 #21 #22 #23 #25 #26 #27 #28 #29 #31 #32 #33 #34 #35 #36 #37 #38 #39.
+>   Headliners: **#31** zero code-splitting (18MB single-file), **#5** sessions never evicted, **#3/#4/#39** App.tsx monolith + `ReviewSidebar` memo still commented out + no memo boundaries, **#16** Pierre diffs never unmount, **#32** mermaid/viz.js eagerly imported, **#33/#34** inlined fonts + all-themes CSS, **#26–#29** unpurged Maps / uncancelled rAF / per-hidden-session pollers, **#36** two WebSocket connections.
+>
+> Per-finding detail below is the original sweep (kept as the reference). The global-keyboard-registry item (`backlog/global-keyboard-registry.md`) folds into this work.
+
 ## Tier 1 — Causes general sluggishness during normal use
 
 ### 1. SessionSurface is not memoized
