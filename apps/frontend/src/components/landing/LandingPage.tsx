@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import {
   Code2,
   Folder,
@@ -17,14 +17,14 @@ import { ASCII_BANNER } from "./ascii-banner";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useProjectStore, projectStore } from "../../stores/project-store";
 import { GitDashboard } from "./git-dashboard/GitDashboard";
+import { ConjoinedSessionsHistory } from "./ConjoinedSessionsHistory";
+import { FullSessionsHistoryView } from "./FullSessionsHistoryView";
 import { useDaemonEventStore } from "../../daemon/events/event-store";
 import { daemonApiClient } from "../../daemon/api/client";
-import { getSessionModeMeta, formatSessionLabel } from "../../shared/session-meta";
 import { buildStacks, type PRStack } from "./buildStacks";
 import type {
   ProjectEntry,
   PRListItem,
-  SessionSummary,
   WorktreeEntry,
 } from "../../daemon/contracts";
 
@@ -221,12 +221,12 @@ export function LandingPage({ onAddProject }: LandingPageProps) {
                         </div>
                       )}
 
-                      {sessions.length > 0 && (
+                      {(projects.length > 0 || sessions.length > 0) && (
                         <div>
                           <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                            Active sessions
+                            Sessions &amp; history
                           </div>
-                          <SessionList sessions={sessions} />
+                          <ConjoinedSessionsHistory onFullView={() => setViewIndex(2)} />
                         </div>
                       )}
 
@@ -247,6 +247,9 @@ export function LandingPage({ onAddProject }: LandingPageProps) {
             </div>
             <div className="h-full w-full shrink-0">
               <GitDashboard active={viewIndex === 1} onBack={() => setViewIndex(0)} />
+            </div>
+            <div className="h-full w-full shrink-0">
+              <FullSessionsHistoryView active={viewIndex === 2} onBack={() => setViewIndex(0)} />
             </div>
           </div>
         </div>
@@ -709,35 +712,6 @@ function WorktreeList({
           </span>
         </button>
       ))}
-    </div>
-  );
-}
-
-function SessionList({ sessions }: { sessions: SessionSummary[] }) {
-  return (
-    <div className="overflow-hidden rounded-lg border border-border">
-      {sessions.map((session, i) => {
-        const meta = getSessionModeMeta(session.mode);
-        const Icon = meta.icon;
-        return (
-          <Link
-            key={session.id}
-            to="/s/$sessionId"
-            params={{ sessionId: session.id }}
-            className={cn(
-              "flex w-full items-center gap-3 px-3 py-2 text-left text-[13px]",
-              i > 0 && "border-t border-border",
-              "text-foreground hover:bg-surface-1",
-            )}
-          >
-            <Icon className="size-3.5 shrink-0 text-muted-foreground/50" />
-            <span className="text-muted-foreground">
-              {formatSessionLabel(session.label, session.mode)}
-            </span>
-            <span className="ml-auto text-[11px] text-muted-foreground/50">{meta.label}</span>
-          </Link>
-        );
-      })}
     </div>
   );
 }

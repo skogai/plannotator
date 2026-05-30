@@ -9,6 +9,9 @@ import type {
   DaemonStatus,
   DaemonWebSocketServerMessage,
 } from "@plannotator/shared/daemon-protocol";
+import type { HistoryIndexEntry } from "@plannotator/shared/storage";
+
+export type { HistoryIndexEntry } from "@plannotator/shared/storage";
 
 export type SessionView = DaemonSessionView;
 export type SessionMode = SessionView | (string & {});
@@ -104,6 +107,11 @@ export interface PRListResponse {
   defaultBranch?: string;
   error?: "no-remote" | "no-cli" | "auth-failed" | "fetch-failed";
   message?: string;
+}
+
+export interface HistoryListResponse {
+  ok: true;
+  history: HistoryIndexEntry[];
 }
 
 export type SessionLifecycleStatus = DaemonSessionStatus;

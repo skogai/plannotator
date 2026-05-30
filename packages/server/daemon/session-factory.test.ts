@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { DaemonSessionStore } from "./session-store";
-import { createDaemonSessionFactory } from "./session-factory";
+import { createDaemonSessionFactory, worktreeSegment } from "./session-factory";
 import type { DaemonFetchContext } from "./server";
 
 let dirs: string[] = [];
@@ -484,5 +484,33 @@ describe("createDaemonSessionFactory", () => {
     expect(completed.status).toBe("completed");
     const result = completed.result as { exit?: boolean };
     expect(result.exit).toBe(true);
+  });
+});
+
+describe("worktreeSegment — collision-free worktree history keys (#822 review)", () => {
+  test("distinct worktrees whose branches sanitize to the same label do NOT collide", () => {
+    const a = worktreeSegment({ cwd: "/work/a-feat_x", branch: "feat_x" });
+    const b = worktreeSegment({ cwd: "/work/a-feat-x", branch: "feat-x" });
+    // Both branch labels normalize to "feat-x"; only the cwd hash keeps them apart.
+    expect(a.startsWith("feat-x-")).toBe(true);
+    expect(b.startsWith("feat-x-")).toBe(true);
+    expect(a).not.toBe(b);
+  });
+
+  test("an unsanitizable branch still yields a non-empty, non-flat segment", () => {
+    const seg = worktreeSegment({ cwd: "/work/wt-x", branch: "x" });
+    // 1-char branch → sanitizeTag returns null; must NOT drop to undefined/flat.
+    expect(seg).toBeTruthy();
+    expect(seg.startsWith("wt-")).toBe(true);
+  });
+
+  test("deterministic: the same worktree cwd always maps to the same segment", () => {
+    expect(worktreeSegment({ cwd: "/work/a-wt", branch: "feat/x" })).toBe(
+      worktreeSegment({ cwd: "/work/a-wt", branch: "feat/x" }),
+    );
+  });
+
+  test("readable branch label is preserved as a prefix", () => {
+    expect(worktreeSegment({ cwd: "/work/a-wt", branch: "feature" }).startsWith("feature-")).toBe(true);
   });
 });

@@ -88,6 +88,16 @@ export interface DaemonSessionSummary {
   expiresAt?: string;
   error?: string;
   remoteShare?: DaemonRemoteShareNotice;
+  /** Owning project root (git root or declared workspace root). */
+  projectCwd?: string;
+  /** Sub-scope the session sits in under its project (worktree / sub-repo), if any. */
+  worktree?: DaemonWorktreeRef;
+}
+
+/** A sub-scope a session sits in under its owning project: a git worktree or sub-repo. */
+export interface DaemonWorktreeRef {
+  cwd: string;
+  branch?: string;
 }
 
 export interface DaemonRemoteShareNotice {
@@ -136,6 +146,8 @@ export interface DaemonProjectEntry {
   lastSeen: string;
   parentCwd?: string;
   branch?: string;
+  /** True when the user explicitly declared this directory as a project root. */
+  declared?: boolean;
 }
 
 export interface DaemonProjectListResponse {

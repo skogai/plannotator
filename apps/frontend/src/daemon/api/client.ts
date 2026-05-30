@@ -15,6 +15,8 @@ import type {
   DirectoryListResponse,
   PRListResponse,
   PRDetailedListResponse,
+  HistoryListResponse,
+  HistoryIndexEntry,
 } from "../contracts";
 import {
   DaemonHubActionError,
@@ -73,6 +75,8 @@ export interface DaemonApiClient {
   listPRs(cwd: string): Promise<DaemonApiResult<PRListResponse>>;
   listDetailedPRs(cwd: string): Promise<DaemonApiResult<PRDetailedListResponse>>;
   createReviewSession(cwd: string, prUrl?: string): Promise<DaemonApiResult<SessionResponse>>;
+  createAnnotateSession(cwd: string, filePath: string): Promise<DaemonApiResult<SessionResponse>>;
+  getHistory(projectName?: string): Promise<DaemonApiResult<HistoryListResponse>>;
 }
 
 type ResponseGuard<T> = (value: unknown) => value is T;
@@ -198,6 +202,24 @@ function isPRList(value: unknown): value is PRListResponse {
 
 function isPRDetailedList(value: unknown): value is PRDetailedListResponse {
   return hasOkTrue(value) && Array.isArray((value as { prs?: unknown }).prs);
+}
+
+function isHistoryIndexEntry(value: unknown): value is HistoryIndexEntry {
+  return (
+    isRecord(value) &&
+    typeof value.project === "string" &&
+    typeof value.slug === "string" &&
+    typeof value.versionCount === "number" &&
+    typeof value.latest === "string" &&
+    typeof value.latestVersionPath === "string" &&
+    (value.worktree === undefined || typeof value.worktree === "string")
+  );
+}
+
+function isHistoryList(value: unknown): value is HistoryListResponse {
+  if (!hasOkTrue(value)) return false;
+  const history = (value as { history?: unknown }).history;
+  return Array.isArray(history) && history.every(isHistoryIndexEntry);
 }
 
 function isSessionBootstrap(value: unknown): value is SessionBootstrap {
@@ -518,6 +540,33 @@ export function createDaemonApiClient(options: DaemonApiClientOptions = {}): Dae
             ...(prUrl && { prUrl }),
           },
         }),
+      );
+    },
+
+    createAnnotateSession(cwd, filePath) {
+      return requestJson(
+        fetchImpl,
+        joinUrl(options.baseUrl, "/daemon/sessions"),
+        isSessionResponse,
+        jsonPost({
+          request: {
+            action: "annotate",
+            origin: "plannotator-frontend",
+            cwd,
+            filePath,
+          },
+        }),
+      );
+    },
+
+    getHistory(projectName) {
+      const query = projectName
+        ? `?${new URLSearchParams({ project: projectName }).toString()}`
+        : "";
+      return requestJson(
+        fetchImpl,
+        joinUrl(options.baseUrl, `/daemon/history${query}`),
+        isHistoryList,
       );
     },
 

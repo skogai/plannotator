@@ -3,7 +3,7 @@ import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { execSync } from "child_process";
 import { homedir } from "os";
-import { join, resolve, dirname } from "path";
+import { join, resolve, dirname, basename } from "path";
 
 export interface ProjectRegistryOptions {
   baseDir?: string;
@@ -50,6 +50,7 @@ export function registerProject(
   name: string,
   cwd: string,
   options: ProjectRegistryOptions = {},
+  declared = false,
 ): DaemonProjectEntry {
   const entries = readProjectRegistry(options);
   const now = new Date().toISOString();
@@ -57,10 +58,11 @@ export function registerProject(
   if (existing) {
     existing.name = name;
     existing.lastSeen = now;
+    if (declared) existing.declared = true; // sticky: never auto-unset a declared root
     writeProjectRegistry(entries, options);
     return existing;
   }
-  const entry: DaemonProjectEntry = { name, cwd, lastSeen: now };
+  const entry: DaemonProjectEntry = { name, cwd, lastSeen: now, ...(declared && { declared: true }) };
   entries.push(entry);
   writeProjectRegistry(entries, options);
   return entry;
@@ -112,6 +114,7 @@ export function addProject(
   cwd: string,
   name: string | undefined,
   options: ProjectRegistryOptions = {},
+  declared = false,
 ): DaemonProjectEntry {
   const resolved = cwd.startsWith("~/")
     ? join(homedir(), cwd.slice(2))
@@ -142,6 +145,7 @@ export function addProject(
       existing.lastSeen = now;
       existing.parentCwd = wt.parentCwd;
       existing.branch = wt.branch;
+      if (declared) existing.declared = true;
       writeProjectRegistry(entries, options);
       return existing;
     }
@@ -151,11 +155,58 @@ export function addProject(
       lastSeen: now,
       parentCwd: wt.parentCwd,
       branch: wt.branch,
+      ...(declared && { declared: true }),
     };
     entries.push(entry);
     writeProjectRegistry(entries, options);
     return entry;
   }
 
-  return registerProject(projectName, resolved, options);
+  return registerProject(projectName, resolved, options, declared);
+}
+
+/** User-declared project roots (registry entries flagged `declared`). */
+export function getDeclaredRoots(
+  options: ProjectRegistryOptions = {},
+): Array<{ cwd: string; name: string }> {
+  return readProjectRegistry(options)
+    .filter((e) => e.declared === true)
+    .map((e) => ({ cwd: e.cwd, name: e.name }));
+}
+
+/**
+ * Persist a resolved project (the owning root, plus its worktree/sub-repo child when
+ * present). Used by auto-add at session-create time. Never sets `declared` — declared
+ * roots are created only via the explicit add path.
+ */
+export function registerResolvedProject(
+  resolved: { projectCwd: string; projectName: string; worktree?: { cwd: string; branch?: string } },
+  options: ProjectRegistryOptions = {},
+): void {
+  // Owning project (preserves an existing `declared` flag).
+  registerProject(resolved.projectName, resolved.projectCwd, options);
+
+  // Sub-scope (worktree or sub-repo) as a child row under the project.
+  if (resolved.worktree && resolved.worktree.cwd !== resolved.projectCwd) {
+    const entries = readProjectRegistry(options);
+    const now = new Date().toISOString();
+    const childCwd = resolved.worktree.cwd;
+    const childName = basename(childCwd) || resolved.projectName;
+    const existing = entries.find((e) => e.cwd === childCwd);
+    if (existing) {
+      existing.name = childName;
+      existing.lastSeen = now;
+      existing.parentCwd = resolved.projectCwd;
+      existing.branch = resolved.worktree.branch;
+    } else {
+      entries.push({
+        name: childName,
+        cwd: childCwd,
+        lastSeen: now,
+        parentCwd: resolved.projectCwd,
+        branch: resolved.worktree.branch,
+      });
+    }
+    writeProjectRegistry(entries, options);
+  }
 }

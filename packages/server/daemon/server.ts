@@ -25,6 +25,7 @@ import { readSnapshot } from "./session-store";
 import { parseRemoteUrl, parseRemoteHost } from "@plannotator/shared/repo";
 import { detectPlatform, checkPRAuth, fetchPRList, fetchPRDetailedList } from "../pr";
 import type { PRRef, PRListItem, PRDetailedListItem } from "@plannotator/shared/pr-types";
+import { listAllHistory } from "../storage";
 
 const RESULT_DELETE_GRACE_MS = 2_000;
 const DAEMON_AUTH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
@@ -529,7 +530,8 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
         }
         const name = typeof body.name === "string" && body.name.length > 0 ? body.name : undefined;
         try {
-          const entry = addProject(body.cwd, name);
+          // Manual add = an explicit project-root declaration (supersedes git boundaries).
+          const entry = addProject(body.cwd, name, {}, true);
           return json({ ok: true, project: entry }, { status: 201 });
         } catch (err) {
           return json(
@@ -717,6 +719,15 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
         } catch {
           return json({ ok: true, prs: [], platform: null });
         }
+      }
+
+      if (url.pathname === "/daemon/history" && req.method === "GET") {
+        const projectFilter = url.searchParams.get("project") ?? undefined;
+        let history = listAllHistory();
+        if (projectFilter) {
+          history = history.filter((entry) => entry.project === projectFilter);
+        }
+        return json({ ok: true, history });
       }
 
       // --- Global settings endpoints (no session context needed) ---

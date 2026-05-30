@@ -7,6 +7,7 @@ import type {
   DaemonSessionMode,
   DaemonSessionStatus,
   DaemonSessionSummary,
+  DaemonWorktreeRef,
 } from "@plannotator/shared/daemon-protocol";
 import type { SessionRequestHandler } from "../session-handler";
 
@@ -17,6 +18,8 @@ export interface DaemonSessionRecord<TResult = unknown> {
   url: string;
   project: string;
   cwd?: string;
+  projectCwd?: string;
+  worktree?: DaemonWorktreeRef;
   label: string;
   origin?: string;
   matchKey?: string;
@@ -39,6 +42,8 @@ export interface CreateDaemonSessionInput<TResult = unknown> {
   url: string;
   project: string;
   cwd?: string;
+  projectCwd?: string;
+  worktree?: DaemonWorktreeRef;
   label: string;
   origin?: string;
   matchKey?: string;
@@ -170,6 +175,8 @@ export class DaemonSessionStore {
       project: input.project,
       label: input.label,
       ...(input.cwd && { cwd: input.cwd }),
+      ...(input.projectCwd && { projectCwd: input.projectCwd }),
+      ...(input.worktree && { worktree: input.worktree }),
       ...(input.origin && { origin: input.origin }),
       ...(input.matchKey && { matchKey: input.matchKey }),
       ...(input.ttlMs !== undefined && { ttlMs: input.ttlMs }),
@@ -214,6 +221,8 @@ export class DaemonSessionStore {
       url: record.url,
       project: record.project,
       ...(record.cwd && { cwd: record.cwd }),
+      ...(record.projectCwd && { projectCwd: record.projectCwd }),
+      ...(record.worktree && { worktree: record.worktree }),
       label: record.label,
       ...(record.origin && { origin: record.origin }),
       createdAt: record.createdAt,
