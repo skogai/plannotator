@@ -4,6 +4,36 @@ Tracked issues and feature requests for the daemon frontend app.
 
 ---
 
+## TODO — review/plan/annotate command still dies at 5 minutes (Bun fetch 300s default)
+
+**Confirmed bug. Real fix NOT yet landed (#824 did not fix it).**
+
+The CLI's `waitForResult` long-poll (`packages/server/daemon/client.ts`) inherits Bun's
+**hard 300-second default `fetch` timeout**. If the user takes longer than 5 minutes to act,
+the client fetch throws `TimeoutError: The operation timed out.`, the `plannotator
+review|plan|annotate` command exits, and the agent never receives the decision.
+
+- **Proven:** a no-option `fetch` against a never-responding server (server idle timeout
+  disabled, as the daemon does via `server.timeout(req, 0)`) throws after **exactly 300s** with
+  that message — matching the observed ~293s session deaths.
+- **#824's `timeout: false` is a no-op** — Bun's `fetch` ignores the `timeout` request option
+  (verified: numeric `timeout: 200` did not abort a 600ms request). The dead `noTimeout` /
+  `BunRequestInit` / `timeout: false` plumbing in `client.ts` should be deleted with the fix.
+- **Only triggers when the command waits >5 min with no decision.** Under 5 minutes it works
+  fine — which is why quick manual tests pass and the bug looks "fixed."
+- **#824 Part B IS good and shipped:** the CLI no longer cancels the session on a wait failure
+  (`apps/hook/server/index.ts`), so the browser tab survives the command's death — but the
+  command itself still exits at 5 min, so the agent loses the result.
+
+**Fix:** make `waitForResult` a bounded re-poll loop — fetch with `signal:
+AbortSignal.timeout(~240_000)` (under the 300s wall); on its own timeout, re-issue (GET is
+idempotent, the daemon keeps the session alive per "sessions never die"). Return on a real
+result; rethrow non-timeout errors. Client-only, ~20 lines, no server/protocol change. Applies
+to review, plan, and annotate equally. Files: `packages/server/daemon/client.ts`
+(`waitForResult`, `requestJson`).
+
+---
+
 ## TODO — Post-merge human verification (deferred from PR #813 & #814)
 
 These two changes were code-reviewed (interrogate, 4 models each) and typecheck/build/unit-test clean, but could not be verified visually/interactively in the agent environment (no browser automation; `glab` not installed). Verify by hand:
