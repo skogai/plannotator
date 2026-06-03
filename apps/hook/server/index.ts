@@ -109,14 +109,14 @@ import {
   findDroidSessionLogsForCwd,
   findSessionLogsByAncestorWalk,
   findSessionLogsForCwd,
-  getLastRenderedMessage,
+  getRecentRenderedMessages,
   resolveDroidSessionLogForCwd,
   resolveSessionLogByAncestorPids,
   resolveSessionLogByCwdScan,
   type RenderedMessage,
 } from "./session-log";
-import { findCodexRolloutByThreadId, getLastCodexMessage, getLatestCodexPlan } from "./codex-session";
-import { findCopilotPlanContent, findCopilotSessionForCwd, getLastCopilotMessage } from "./copilot-session";
+import { findCodexRolloutByThreadId, getLatestCodexPlan, getRecentCodexMessages } from "./codex-session";
+import { findCopilotPlanContent, findCopilotSessionForCwd, getRecentCopilotMessages } from "./copilot-session";
 import {
   formatInteractiveNoArgClarification,
   formatTopLevelHelp,
@@ -152,10 +152,10 @@ const noJinaIdx = args.indexOf("--no-jina");
 const cliNoJina = noJinaIdx !== -1;
 if (cliNoJina) args.splice(noJinaIdx, 1);
 
-// Annotate review-gate flags (#570): --gate adds an Approve button,
-// --json switches stdout to structured decision output, --hook emits
-// hook-native JSON that works directly with Claude Code and Codex
-// PostToolUse/Stop hook protocols.
+// Annotate review-gate flags: --gate adds an Approve button, --json
+// switches stdout to structured decision output, --hook emits hook-native
+// JSON that works directly with Claude Code and Codex PostToolUse/Stop
+// hook protocols.
 const gateIdx = args.indexOf("--gate");
 let gateFlag = gateIdx !== -1;
 if (gateFlag) args.splice(gateIdx, 1);
@@ -170,7 +170,7 @@ const renderHtmlIdx = args.indexOf("--render-html");
 const renderHtmlFlag = renderHtmlIdx !== -1;
 if (renderHtmlFlag) args.splice(renderHtmlIdx, 1);
 
-// Stdout matrix for annotate / annotate-last / copilot annotate-last (#570).
+// Stdout matrix for annotate / annotate-last / copilot annotate-last.
 //
 // --hook (recommended for hooks):
 //   Approve/Close → empty stdout (hook passes, agent proceeds).
@@ -853,7 +853,15 @@ if (args[0] === "sessions") {
   const isCodex = !!codexThreadId;
   const isDroid = detectedOrigin === "droid";
 
+  // Collect up to N recent assistant messages so the user can pick the right
+  // one — defaults to the same selection as the legacy "last message"
+  // behavior (index 0). Necessary because the newest transcript entry isn't
+  // always the message the user intended to annotate (e.g., after /rewind).
+  // 25 covers long conversations worth of rewinds without flooding the
+  // picker; the list scrolls past this if more are shown.
+  const RECENT_MESSAGES_LIMIT = 25;
   let lastMessage: RenderedMessage | null = null;
+  let recentMessages: RenderedMessage[] = [];
 
   if (stdinFlag) {
     const text = (await Bun.stdin.text()).trim();
@@ -870,10 +878,9 @@ if (args[0] === "sessions") {
       if (process.env.PLANNOTATOR_DEBUG) {
         console.error(`[DEBUG] Rollout: ${rolloutPath}`);
       }
-      const msg = getLastCodexMessage(rolloutPath, { beforeActiveTurn: true });
-      if (msg) {
-        lastMessage = { messageId: codexThreadId, text: msg.text, lineNumbers: [] };
-      }
+      recentMessages = getRecentCodexMessages(rolloutPath, RECENT_MESSAGES_LIMIT, { beforeActiveTurn: true })
+        .map((m) => ({ messageId: m.messageId, text: m.text, lineNumbers: [], timestamp: m.timestamp }));
+      lastMessage = recentMessages[0] ?? null;
     }
   } else if (isDroid) {
     // Droid/Factory path: resolve the current repo's session log from
@@ -903,7 +910,8 @@ if (args[0] === "sessions") {
       console.error(`[DEBUG] Droid selected log: ${droidLog ?? "(none)"}`);
     }
     if (droidLog) {
-      lastMessage = getLastRenderedMessage(droidLog);
+      recentMessages = getRecentRenderedMessages(droidLog, RECENT_MESSAGES_LIMIT);
+      lastMessage = recentMessages[0] ?? null;
     }
   } else {
     // Claude Code path: resolve session log
@@ -935,8 +943,12 @@ if (args[0] === "sessions") {
         console.error(`[DEBUG] ${label}: ${paths.length ? paths.join(", ") : "(none)"}`);
       }
       for (const logPath of paths) {
-        lastMessage = getLastRenderedMessage(logPath);
-        if (lastMessage) return;
+        const recent = getRecentRenderedMessages(logPath, RECENT_MESSAGES_LIMIT);
+        if (recent.length > 0) {
+          recentMessages = recent;
+          lastMessage = recent[0];
+          return;
+        }
       }
     }
 
@@ -969,6 +981,12 @@ if (args[0] === "sessions") {
   const annotatedMessage = lastMessage;
   const annotateProject = (await detectProjectName()) ?? "_unknown";
 
+  // Only ship the picker list when there's a choice to make. The client uses
+  // its presence (length > 1) as the signal to render the picker UI.
+  const pickerMessages = recentMessages.length > 1
+    ? recentMessages.map((m) => ({ messageId: m.messageId, text: m.text, timestamp: m.timestamp }))
+    : undefined;
+
   const server = await startAnnotateServer({
     markdown: annotatedMessage.text,
     filePath: "last-message",
@@ -979,6 +997,7 @@ if (args[0] === "sessions") {
     pasteApiUrl,
     gate: gateFlag,
     htmlContent: planHtmlContent,
+    recentMessages: pickerMessages,
     onReady: async (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);
 
@@ -1147,7 +1166,8 @@ if (args[0] === "sessions") {
     console.error(`[DEBUG] Session dir: ${sessionDir}`);
   }
 
-  const msg = getLastCopilotMessage(sessionDir);
+  const recent = getRecentCopilotMessages(sessionDir, 25);
+  const msg = recent[0] ?? null;
   if (!msg) {
     console.error("No assistant message found in Copilot CLI session.");
     process.exit(1);
@@ -1158,12 +1178,14 @@ if (args[0] === "sessions") {
   }
 
   const annotateProject = (await detectProjectName()) ?? "_unknown";
+  const pickerMessages = recent.length > 1 ? recent : undefined;
 
   const server = await startAnnotateServer({
     markdown: msg.text,
     filePath: "last-message",
     origin: "copilot-cli",
     mode: "annotate-last",
+    recentMessages: pickerMessages,
     sharingEnabled,
     shareBaseUrl,
     gate: gateFlag,
