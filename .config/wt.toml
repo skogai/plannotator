@@ -1,0 +1,5 @@
+[[pre-start]]
+skogai-init = ".skogai/init.sh"
+
+[[pre-start]]
+direnv = "direnv allow"
